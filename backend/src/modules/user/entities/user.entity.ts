@@ -41,6 +41,15 @@ export class User {
   @Column({ type: 'text', nullable: true })
   kycRejectionReason: string;
 
+  @Column({ type: 'boolean', default: false })
+  autoSweepEnabled: boolean;
+
+  @Column({ type: 'decimal', precision: 14, scale: 2, nullable: true })
+  sweepThreshold: number;
+
+  @Column({ type: 'uuid', nullable: true })
+  defaultSavingsProductId: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

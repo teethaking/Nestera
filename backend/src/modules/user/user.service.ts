@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateSweepSettingsDto } from './dto/update-sweep-settings.dto';
+import { SweepSettingsDto } from './dto/sweep-settings.dto';
 
 @Injectable()
 export class UserService {
