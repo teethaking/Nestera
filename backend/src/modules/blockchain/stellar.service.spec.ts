@@ -1,8 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { Keypair, nativeToScVal } from '@stellar/stellar-sdk';
 import { StellarService } from './stellar.service';
 import { TransactionDto } from './dto/transaction.dto';
 import { RpcClientWrapper } from './rpc-client.wrapper';
+
+const TEST_PUBLIC_KEY = Keypair.random().publicKey();
+const TEST_DELEGATE_KEY = Keypair.random().publicKey();
 
 /** Build a minimal fake Horizon transaction record */
 const makeFakeTx = (overrides: Partial<Record<string, unknown>> = {}) => ({
@@ -20,7 +24,7 @@ const makeFakeTx = (overrides: Partial<Record<string, unknown>> = {}) => ({
   ...overrides,
 });
 
-describe('StellarService – getRecentTransactions', () => {
+describe('StellarService', () => {
   let service: StellarService;
   let mockTransactionCall: jest.Mock;
   let mockRpcClient: jest.Mocked<RpcClientWrapper>;
@@ -39,6 +43,8 @@ describe('StellarService – getRecentTransactions', () => {
                 'stellar.rpcUrl': 'https://soroban-testnet.stellar.org',
                 'stellar.horizonUrl': 'https://horizon-testnet.stellar.org',
                 'stellar.network': 'testnet',
+                'stellar.contractId':
+                  'CCJZ5DGASBWQXR5MPFCJXMBI333XE5U3FSJTNQU7RIKE3P5GN2K2WYD5',
                 'stellar.rpcFallbackUrls': [],
                 'stellar.horizonFallbackUrls': [],
                 'stellar.rpcMaxRetries': 3,
@@ -82,7 +88,7 @@ describe('StellarService – getRecentTransactions', () => {
     mockTransactionCall.mockResolvedValue({ records: [fakeTx] });
 
     const result = await service.getRecentTransactions(
-      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+      TEST_PUBLIC_KEY,
     );
 
     expect(result).toHaveLength(1);
@@ -110,7 +116,7 @@ describe('StellarService – getRecentTransactions', () => {
     mockTransactionCall.mockResolvedValue({ records: [fakeTx] });
 
     const [tx] = await service.getRecentTransactions(
-      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+      TEST_PUBLIC_KEY,
     );
 
     expect(tx.token).toBe('USDC');
@@ -124,7 +130,7 @@ describe('StellarService – getRecentTransactions', () => {
       .mockImplementation(() => {});
 
     const result = await service.getRecentTransactions(
-      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+      TEST_PUBLIC_KEY,
     );
 
     expect(result).toEqual([]);
@@ -138,7 +144,7 @@ describe('StellarService – getRecentTransactions', () => {
     mockTransactionCall.mockResolvedValue({ records: [fakeTx] });
 
     const [tx] = await service.getRecentTransactions(
-      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+      TEST_PUBLIC_KEY,
     );
 
     expect(tx.amount).toBe('0');
@@ -150,7 +156,7 @@ describe('StellarService – getRecentTransactions', () => {
     mockTransactionCall.mockResolvedValue({ records: [] });
 
     await service.getRecentTransactions(
-      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+      TEST_PUBLIC_KEY,
       5,
     );
 
@@ -159,5 +165,54 @@ describe('StellarService – getRecentTransactions', () => {
       expect.any(Function),
       'horizon',
     );
+  });
+
+  it('should return a delegated wallet when contract data resolves to an address', async () => {
+    jest
+      .spyOn(mockRpcClient, 'executeWithRetry')
+      .mockImplementation(async (operation) => {
+        const fakeRpcServer = {
+          getContractData: jest.fn().mockResolvedValue({
+            val: {
+              contractData: () => ({
+                val: () =>
+                  nativeToScVal(
+                    TEST_DELEGATE_KEY,
+                    { type: 'address' },
+                  ),
+              }),
+            },
+          }),
+        };
+
+        return operation(fakeRpcServer as any);
+      });
+
+    await expect(
+      service.getDelegationForUser(
+        TEST_PUBLIC_KEY,
+      ),
+    ).resolves.toBe(TEST_DELEGATE_KEY);
+  });
+
+  it('should return null when contract data is missing for all candidate keys', async () => {
+    jest
+      .spyOn(mockRpcClient, 'executeWithRetry')
+      .mockImplementation(async (operation) => {
+        const fakeRpcServer = {
+          getContractData: jest.fn().mockRejectedValue({
+            code: 404,
+            message: 'missing',
+          }),
+        };
+
+        return operation(fakeRpcServer as any);
+      });
+
+    await expect(
+      service.getDelegationForUser(
+        TEST_PUBLIC_KEY,
+      ),
+    ).resolves.toBeNull();
   });
 });

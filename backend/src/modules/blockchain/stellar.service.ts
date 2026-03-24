@@ -6,11 +6,20 @@ import {
   Keypair,
   Networks,
   rpc,
+  scValToNative,
   Transaction,
+  nativeToScVal,
   xdr,
 } from '@stellar/stellar-sdk';
 import { TransactionDto } from './dto/transaction.dto';
 import { RpcClientWrapper, RpcEndpoint } from './rpc-client.wrapper';
+
+const DELEGATION_STORAGE_KEYS = [
+  'delegate',
+  'delegation',
+  'Delegate',
+  'Delegation',
+] as const;
 
 @Injectable()
 export class StellarService implements OnModuleInit {
@@ -119,6 +128,63 @@ export class StellarService implements OnModuleInit {
     return Promise.resolve();
   }
 
+  async getDelegationForUser(publicKey: string): Promise<string | null> {
+    const contractId = this.configService.get<string>('stellar.contractId');
+    if (!contractId || !publicKey) {
+      return null;
+    }
+
+    try {
+      return await this.rpcClient.executeWithRetry(
+        async (client) => {
+          const rpcServer = client as rpc.Server;
+
+          for (const storageKeyName of DELEGATION_STORAGE_KEYS) {
+            const storageKey = nativeToScVal([storageKeyName, publicKey], {
+              type: ['symbol', 'address'],
+            });
+
+            try {
+              const entry = await rpcServer.getContractData(
+                contractId,
+                storageKey,
+                rpc.Durability.Persistent,
+              );
+
+              const rawValue = entry.val.contractData().val();
+              const delegate = this.normalizeDelegationValue(
+                scValToNative(rawValue),
+              );
+
+              if (delegate) {
+                return delegate;
+              }
+
+              if (delegate === null) {
+                return null;
+              }
+            } catch (error) {
+              if (this.isContractDataMissing(error)) {
+                continue;
+              }
+
+              throw error;
+            }
+          }
+
+          return null;
+        },
+        'rpc',
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch delegation for ${publicKey}: ${(error as Error).message}`,
+        error,
+      );
+      return null;
+    }
+  }
+
   generateKeypair(): { publicKey: string; secretKey: string } {
     const keypair = Keypair.random();
     return {
@@ -213,5 +279,26 @@ export class StellarService implements OnModuleInit {
       );
       return [];
     }
+  }
+
+  private normalizeDelegationValue(value: unknown): string | null {
+    if (value === undefined || value === null || value === false) {
+      return null;
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+
+    return null;
+  }
+
+  private isContractDataMissing(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 404
+    );
   }
 }
