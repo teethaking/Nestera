@@ -1,0 +1,13 @@
+
+> backend@0.0.1 test
+> jest src/modules/analytics/analytics.service.spec.ts --verbose
+
+PASS src/modules/analytics/analytics.service.spec.ts (8.546 s)
+  AnalyticsService
+    √ calculates 1W portfolio timeline correctly by working backward (23 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       1 passed, 1 total
+Snapshots:   0 total
+Time:        8.975 s
+Ran all test suites matching /src\\modules\\analytics\\analytics.service.spec.ts/i.
