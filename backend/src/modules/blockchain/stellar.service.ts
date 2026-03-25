@@ -122,6 +122,56 @@ export class StellarService implements OnModuleInit {
     return Promise.resolve();
   }
 
+  /**
+   * Invoke a read-only contract method and return the result
+   * @param contractId - The Soroban contract ID
+   * @param method - The method name to invoke
+   * @param args - Optional arguments to pass to the method
+   * @returns The result from the contract method
+   */
+  async invokeContractRead(
+    contractId: string,
+    method: string,
+    args?: unknown[],
+  ): Promise<unknown> {
+    try {
+      return await this.rpcClient.executeWithRetry(async (client) => {
+        const rpcServer = client as rpc.Server;
+
+        // Build the method invocation arguments
+        const methodArg = nativeToScVal(method, { type: 'symbol' });
+        const argsArray = args ? args.map((arg) => nativeToScVal(arg)) : [];
+
+        const storageKey = nativeToScVal(
+          ['invoke', contractId, methodArg, ...argsArray],
+          {
+            type: [
+              'symbol',
+              'address',
+              'symbol',
+              ...argsArray.map(() => 'unknown'),
+            ],
+          },
+        );
+
+        const entry = await rpcServer.getContractData(
+          contractId,
+          storageKey,
+          rpc.Durability.Temporary,
+        );
+
+        const rawValue = entry.val.contractData().val();
+        return scValToNative(rawValue);
+      }, 'rpc');
+    } catch (error) {
+      this.logger.error(
+        `Failed to invoke contract read ${contractId}.${method}: ${(error as Error).message}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
   async getDelegationForUser(publicKey: string): Promise<string | null> {
     const contractId = this.configService.get<string>('stellar.contractId');
     if (!contractId || !publicKey) {
