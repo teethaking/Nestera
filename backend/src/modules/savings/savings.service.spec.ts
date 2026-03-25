@@ -3,6 +3,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { SavingsService } from './savings.service';
+import { PredictiveEvaluatorService } from './services/predictive-evaluator.service';
 import { SavingsProduct } from './entities/savings-product.entity';
 import { UserSubscription } from './entities/user-subscription.entity';
 import { SavingsGoal, SavingsGoalStatus } from './entities/savings-goal.entity';
@@ -77,6 +78,16 @@ describe('SavingsService', () => {
           useValue: blockchainSavingsService,
         },
         {
+          provide: PredictiveEvaluatorService,
+          useValue: {
+            calculateProjectedBalance: jest.fn((balance) => balance),
+            isOffTrack: jest.fn(() => false),
+            calculateProjectionGap: jest.fn(() => 0),
+            calculateDaysRemaining: jest.fn(() => 365),
+            calculateRequiredMonthlyContribution: jest.fn(() => 0),
+          },
+        },
+        {
           provide: ConfigService,
           useValue: {
             get: jest.fn((key: string) =>
@@ -114,6 +125,7 @@ describe('SavingsService', () => {
       id: 'user-1',
       publicKey: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
     });
+    subscriptionRepository.find.mockResolvedValue([]);
     blockchainSavingsService.getUserSavingsBalance.mockResolvedValue({
       flexible: 24_000_000,
       locked: 50_000_000,
@@ -127,6 +139,10 @@ describe('SavingsService', () => {
         targetAmount: 100,
         currentBalance: 7.4,
         percentageComplete: 7,
+        projectedBalance: 7.4,
+        isOffTrack: false,
+        projectionGap: 0,
+        appliedYieldRate: 0,
       }),
     ]);
   });
@@ -149,11 +165,16 @@ describe('SavingsService', () => {
       id: 'user-1',
       publicKey: null,
     });
+    subscriptionRepository.find.mockResolvedValue([]);
 
     await expect(service.findMyGoals('user-1')).resolves.toEqual([
       expect.objectContaining({
         currentBalance: 0,
         percentageComplete: 0,
+        projectedBalance: 0,
+        isOffTrack: false,
+        projectionGap: 0,
+        appliedYieldRate: 0,
       }),
     ]);
     expect(
@@ -179,6 +200,7 @@ describe('SavingsService', () => {
       id: 'user-1',
       publicKey: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
     });
+    subscriptionRepository.find.mockResolvedValue([]);
     blockchainSavingsService.getUserSavingsBalance.mockResolvedValue({
       flexible: 40_000_000,
       locked: 20_000_000,
@@ -189,6 +211,10 @@ describe('SavingsService', () => {
       expect.objectContaining({
         currentBalance: 6,
         percentageComplete: 100,
+        projectedBalance: 6,
+        isOffTrack: false,
+        projectionGap: 0,
+        appliedYieldRate: 0,
       }),
     ]);
   });
