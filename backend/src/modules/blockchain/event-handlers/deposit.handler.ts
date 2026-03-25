@@ -52,7 +52,10 @@ export class DepositHandler {
       const productRepo = manager.getRepository(SavingsProduct);
 
       const user = await userRepo.findOne({
-        where: [{ publicKey: payload.publicKey }, { walletAddress: payload.publicKey }],
+        where: [
+          { publicKey: payload.publicKey },
+          { walletAddress: payload.publicKey },
+        ],
       });
 
       if (!user) {
@@ -63,7 +66,9 @@ export class DepositHandler {
 
       const existingTx = await txRepo.findOne({ where: { eventId } });
       if (existingTx) {
-        this.logger.debug(`Deposit event ${eventId} already persisted. Skipping.`);
+        this.logger.debug(
+          `Deposit event ${eventId} already persisted. Skipping.`,
+        );
         return;
       }
 
@@ -97,14 +102,18 @@ export class DepositHandler {
 
       if (!subscription) {
         const defaultProduct = user.defaultSavingsProductId
-          ? await productRepo.findOne({ where: { id: user.defaultSavingsProductId } })
+          ? await productRepo.findOne({
+              where: { id: user.defaultSavingsProductId },
+            })
           : await productRepo.findOne({
               where: { isActive: true },
               order: { createdAt: 'ASC' },
             });
 
         if (!defaultProduct) {
-          throw new Error('No savings product found to create subscription aggregate.');
+          throw new Error(
+            'No savings product found to create subscription aggregate.',
+          );
         }
 
         subscription = subRepo.create({
@@ -140,8 +149,12 @@ export class DepositHandler {
     const asRecord = this.ensureObject(decoded);
 
     const publicKey =
-      this.pickString(asRecord, ['publicKey', 'userPublicKey', 'user', 'address']) ??
-      '';
+      this.pickString(asRecord, [
+        'publicKey',
+        'userPublicKey',
+        'user',
+        'address',
+      ]) ?? '';
     const amountRaw = asRecord['amount'];
 
     const amount =
@@ -154,7 +167,9 @@ export class DepositHandler {
             : '';
 
     if (!publicKey || !amount || Number.isNaN(Number(amount))) {
-      throw new Error('Invalid Deposit payload: expected publicKey + numeric amount');
+      throw new Error(
+        'Invalid Deposit payload: expected publicKey + numeric amount',
+      );
     }
 
     return { publicKey, amount };
@@ -239,9 +254,9 @@ export class DepositHandler {
       typeof (topicPart as { toXDR?: unknown }).toXDR === 'function'
     ) {
       try {
-        const base64 = (topicPart as { toXDR: (encoding?: string) => string }).toXDR(
-          'base64',
-        );
+        const base64 = (
+          topicPart as { toXDR: (encoding?: string) => string }
+        ).toXDR('base64');
         return Buffer.from(base64, 'base64').toString('hex');
       } catch {
         return null;

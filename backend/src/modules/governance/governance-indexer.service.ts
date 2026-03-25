@@ -29,7 +29,7 @@ export class GovernanceIndexerService implements OnModuleInit {
     private readonly proposalRepo: Repository<GovernanceProposal>,
     @InjectRepository(Vote)
     private readonly voteRepo: Repository<Vote>,
-  ) { }
+  ) {}
 
   onModuleInit() {
     this.initIndexer();

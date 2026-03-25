@@ -12,4 +12,4 @@ import { Vote } from './entities/vote.entity';
   controllers: [GovernanceController],
   providers: [GovernanceService, GovernanceIndexerService],
 })
-export class GovernanceModule { }
+export class GovernanceModule {}
