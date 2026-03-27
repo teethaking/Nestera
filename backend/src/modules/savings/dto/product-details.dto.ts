@@ -46,6 +46,9 @@ export class ProductDetailsDto {
   @ApiProperty({ description: 'Product creation timestamp' })
   createdAt: Date;
 
+  @ApiProperty({ description: 'Risk level classification' })
+  riskLevel: string;
+
   @ApiProperty({ description: 'Product last update timestamp' })
   updatedAt: Date;
 }

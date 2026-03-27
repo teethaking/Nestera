@@ -45,6 +45,9 @@ export class SavingsProduct {
   @Column({ default: true })
   isActive: boolean;
 
+  @Column({ type: 'varchar', length: 20, default: 'Low' })
+  riskLevel: string;
+
   @CreateDateColumn()
   createdAt: Date;
 
