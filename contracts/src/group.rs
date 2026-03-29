@@ -454,11 +454,7 @@ pub fn contribute_to_group_save(
 
     // Update user's total balance
     let user_key = DataKey::User(user.clone());
-    if let Some(mut user_data) = env
-        .storage()
-        .persistent()
-        .get::<DataKey, crate::storage_types::User>(&user_key)
-    {
+    if let Some(mut user_data) = env.storage().persistent().get::<DataKey, crate::storage_types::User>(&user_key) {
         user_data.total_balance = user_data
             .total_balance
             .checked_add(amount)
@@ -647,11 +643,7 @@ pub fn break_group_save(env: &Env, user: Address, group_id: u64) -> Result<(), S
 
     // Update user's total balance
     let user_key = DataKey::User(user.clone());
-    if let Some(mut user_data) = env
-        .storage()
-        .persistent()
-        .get::<DataKey, crate::storage_types::User>(&user_key)
-    {
+    if let Some(mut user_data) = env.storage().persistent().get::<DataKey, crate::storage_types::User>(&user_key) {
         user_data.total_balance = user_data
             .total_balance
             .checked_sub(user_contribution)
