@@ -5,10 +5,17 @@ import { NotificationsController } from './notifications.controller';
 import { UserNotificationsController } from './user-notifications.controller';
 import { Notification } from './entities/notification.entity';
 import { NotificationPreference } from './entities/notification-preference.entity';
+import { PendingNotification } from './entities/pending-notification.entity';
 import { WaitlistEntry } from '../savings/entities/waitlist-entry.entity';
+import { WaitlistEvent } from '../savings/entities/waitlist-event.entity';
+import { Delegation } from '../governance/entities/delegation.entity';
+import { GovernanceProposal } from '../governance/entities/governance-proposal.entity';
+import { Vote } from '../governance/entities/vote.entity';
 import { MailModule } from '../mail/mail.module';
+import { BlockchainModule } from '../blockchain/blockchain.module';
 import { User } from '../user/entities/user.entity';
 import { MilestoneSchedulerService } from './milestone-scheduler.service';
+import { GovernanceNotificationScheduler } from './governance-notification.scheduler';
 import { SavingsModule } from '../savings/savings.module';
 
 @Module({
@@ -16,14 +23,24 @@ import { SavingsModule } from '../savings/savings.module';
     TypeOrmModule.forFeature([
       Notification,
       NotificationPreference,
+      PendingNotification,
       User,
       WaitlistEntry,
+      WaitlistEvent,
+      Delegation,
+      GovernanceProposal,
+      Vote,
     ]),
     MailModule,
+    BlockchainModule,
     SavingsModule,
   ],
   controllers: [NotificationsController, UserNotificationsController],
-  providers: [NotificationsService, MilestoneSchedulerService],
+  providers: [
+    NotificationsService,
+    MilestoneSchedulerService,
+    GovernanceNotificationScheduler,
+  ],
   exports: [NotificationsService],
 })
 export class NotificationsModule {}

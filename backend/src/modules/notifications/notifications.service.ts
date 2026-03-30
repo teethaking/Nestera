@@ -3,7 +3,12 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification, NotificationType } from './entities/notification.entity';
-import { NotificationPreference } from './entities/notification-preference.entity';
+import {
+  NotificationPreference,
+  DigestFrequency,
+} from './entities/notification-preference.entity';
+import { PendingNotification } from './entities/pending-notification.entity';
+import { Delegation } from '../governance/entities/delegation.entity';
 import { MailService } from '../mail/mail.service';
 import { User } from '../user/entities/user.entity';
 import { WaitlistEntry } from '../savings/entities/waitlist-entry.entity';
@@ -44,6 +49,10 @@ export class NotificationsService {
     private readonly notificationRepository: Repository<Notification>,
     @InjectRepository(NotificationPreference)
     private readonly preferenceRepository: Repository<NotificationPreference>,
+    @InjectRepository(PendingNotification)
+    private readonly pendingRepository: Repository<PendingNotification>,
+    @InjectRepository(Delegation)
+    private readonly delegationRepository: Repository<Delegation>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(WaitlistEntry)
@@ -576,6 +585,172 @@ export class NotificationsService {
     preferences = await this.preferenceRepository.save(preferences);
 
     return preferences;
+  }
+
+  /**
+   * Listen to governance.proposal.created event
+   */
+  @OnEvent('governance.proposal.created')
+  async handleProposalCreated(event: {
+    proposalId: string;
+    onChainId: number;
+    proposer: string;
+    title: string;
+  }) {
+    this.logger.log(`Processing governance.proposal.created for ${event.onChainId}`);
+
+    try {
+      // Find all users who have governance notifications enabled
+      const usersWithPrefs = await this.userRepository
+        .createQueryBuilder('user')
+        .innerJoinAndSelect(
+          'notification_preferences',
+          'pref',
+          'pref.userId = user.id',
+        )
+        .where('pref.governanceNotifications = true')
+        .getMany();
+
+      for (const user of usersWithPrefs) {
+        await this.dispatchNotification({
+          userId: user.id,
+          type: NotificationType.GOVERNANCE_PROPOSAL_CREATED,
+          title: 'New Governance Proposal',
+          message: `A new proposal "#${event.onChainId}: ${event.title}" has been created.`,
+          metadata: event,
+        });
+      }
+    } catch (error) {
+      this.logger.error('Error processing governance.proposal.created', error);
+    }
+  }
+
+  /**
+   * Listen to governance.vote.cast event to notify delegators
+   */
+  @OnEvent('governance.vote.cast')
+  async handleVoteCast(event: {
+    voter: string;
+    onChainId: number;
+    direction: string;
+    weight: string;
+  }) {
+    this.logger.log(`Processing governance.vote.cast by ${event.voter}`);
+
+    try {
+      // Find all delegators for this voter
+      const delegations = await this.delegationRepository.find({
+        where: { delegateAddress: event.voter },
+      });
+
+      for (const delegation of delegations) {
+        // Find user by delegator address
+        const user = await this.userRepository.findOne({
+          where: { publicKey: delegation.delegatorAddress },
+        });
+
+        if (user) {
+          await this.dispatchNotification({
+            userId: user.id,
+            type: NotificationType.GOVERNANCE_DELEGATE_VOTED,
+            title: 'Your Delegate Voted',
+            message: `Your delegate ${event.voter.slice(0, 6)}... voted ${event.direction} on proposal #${event.onChainId}.`,
+            metadata: event,
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.error('Error processing governance.vote.cast', error);
+    }
+  }
+
+  /**
+   * Listen to governance.proposal.status_updated event
+   */
+  @OnEvent('governance.proposal.status_updated')
+  async handleProposalStatusUpdated(event: {
+    proposalId: string;
+    onChainId: number;
+    status: string;
+  }) {
+    this.logger.log(
+      `Processing governance.proposal.status_updated for ${event.onChainId} to ${event.status}`,
+    );
+
+    try {
+      // Notify everyone about significant status changes (Passed/Failed)
+      const usersWithPrefs = await this.userRepository
+        .createQueryBuilder('user')
+        .innerJoinAndSelect(
+          'notification_preferences',
+          'pref',
+          'pref.userId = user.id',
+        )
+        .where('pref.governanceNotifications = true')
+        .getMany();
+
+      const type =
+        event.status === 'Passed'
+          ? NotificationType.GOVERNANCE_PROPOSAL_QUEUED
+          : NotificationType.GOVERNANCE_PROPOSAL_EXECUTED; // Simplified for demo
+
+      for (const user of usersWithPrefs) {
+        await this.dispatchNotification({
+          userId: user.id,
+          type,
+          title: `Proposal #${event.onChainId} ${event.status}`,
+          message: `Governance proposal #${event.onChainId} has been successfully ${event.status.toLowerCase()}.`,
+          metadata: event,
+        });
+      }
+    } catch (error) {
+      this.logger.error('Error processing governance.proposal.status_updated', error);
+    }
+  }
+
+  /**
+   * Helper to dispatch notification based on user preferences and digest settings
+   */
+  async dispatchNotification(data: {
+    userId: string;
+    type: NotificationType;
+    title: string;
+    message: string;
+    metadata?: Record<string, any>;
+  }) {
+    const preferences = await this.getOrCreatePreferences(data.userId);
+    const user = await this.userRepository.findOne({ where: { id: data.userId } });
+
+    if (!user) return;
+
+    // 1. Always create In-App notification if enabled
+    if (preferences.inAppNotifications) {
+      await this.createNotification(data);
+    }
+
+    // 2. Handle Email based on Digest Frequency
+    if (preferences.emailNotifications) {
+      if (preferences.digestFrequency === DigestFrequency.INSTANT) {
+        // Send instant email
+        await this.mailService.sendGovernanceEmail(
+          user.email,
+          user.name || 'User',
+          data.title,
+          data.message,
+        );
+      } else {
+        // Store for Daily/Weekly digest
+        await this.pendingRepository.save(
+          this.pendingRepository.create({
+            userId: data.userId,
+            type: data.type,
+            title: data.title,
+            message: data.message,
+            metadata: data.metadata,
+          }),
+        );
+      }
+    }
   }
 
   /**

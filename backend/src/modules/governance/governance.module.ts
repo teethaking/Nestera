@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { GovernanceController } from './governance.controller';
 import { GovernanceProposalsController } from './governance-proposals.controller';
 import { GovernanceService } from './governance.service';
@@ -10,12 +11,14 @@ import { UserModule } from '../user/user.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { GovernanceProposal } from './entities/governance-proposal.entity';
 import { Vote } from './entities/vote.entity';
+import { Delegation } from './entities/delegation.entity';
 
 @Module({
   imports: [
     UserModule,
     BlockchainModule,
-    TypeOrmModule.forFeature([GovernanceProposal, Vote]),
+    EventEmitterModule.forRoot(),
+    TypeOrmModule.forFeature([GovernanceProposal, Vote, Delegation]),
   ],
   controllers: [
     GovernanceController,

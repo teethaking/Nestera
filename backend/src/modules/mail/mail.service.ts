@@ -238,4 +238,29 @@ export class MailService {
       this.logger.error(`Failed to send raw email to ${to}`, error);
     }
   }
+
+  async sendGovernanceEmail(
+    userEmail: string,
+    name: string,
+    subject: string,
+    message: string,
+  ): Promise<void> {
+    try {
+      await this.mailerService.sendMail({
+        to: userEmail,
+        subject,
+        template: './generic-notification',
+        context: {
+          name: name || 'User',
+          message,
+        },
+      });
+      this.logger.log(`Governance email (${subject}) sent to ${userEmail}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send governance email to ${userEmail}`,
+        error,
+      );
+    }
+  }
 }
