@@ -19,6 +19,7 @@ import {
   SubscriptionStatus,
 } from './entities/user-subscription.entity';
 import { SavingsGoal, SavingsGoalStatus } from './entities/savings-goal.entity';
+import { ProductApySnapshot } from './entities/product-apy-snapshot.entity';
 import {
   WithdrawalRequest,
   WithdrawalStatus,
@@ -32,6 +33,10 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { SavingsProductDto } from './dto/savings-product.dto';
 import { GoalProgressDto } from './dto/goal-progress.dto';
+import {
+  MetricsGranularity,
+  ProductMetricsDto,
+} from './dto/product-metrics.dto';
 import { User } from '../user/entities/user.entity';
 import { SavingsService as BlockchainSavingsService } from '../blockchain/savings.service';
 import { PredictiveEvaluatorService } from './services/predictive-evaluator.service';
@@ -66,6 +71,7 @@ export interface ProductCapacitySnapshot {
 
 const STROOPS_PER_XLM = 10_000_000;
 const POOLS_CACHE_KEY = 'pools_all';
+const METRICS_CACHE_TTL = 3600000; // 1 hour in ms
 
 @Injectable()
 export class SavingsService {
@@ -80,6 +86,8 @@ export class SavingsService {
     private readonly goalRepository: Repository<SavingsGoal>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(ProductApySnapshot)
+    private readonly snapshotRepository: Repository<ProductApySnapshot>,
     @InjectRepository(SavingsProductVersionAudit)
     private readonly productVersionAuditRepository: Repository<SavingsProductVersionAudit>,
     @InjectRepository(WithdrawalRequest)
@@ -539,6 +547,215 @@ export class SavingsService {
         );
       }),
     );
+  }
+
+  async getProductMetrics(
+    id: string,
+    granularity: MetricsGranularity = MetricsGranularity.DAILY,
+  ): Promise<ProductMetricsDto> {
+    const cacheKey = `product_metrics:${id}:${granularity}`;
+    const cached = await this.cacheManager.get<ProductMetricsDto>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const product = await this.productRepository.findOne({
+      where: { id },
+      relations: ['subscriptions'],
+    });
+    if (!product) {
+      throw new NotFoundException(`Savings product ${id} not found`);
+    }
+
+    const now = new Date();
+    const lookbackDays =
+      granularity === MetricsGranularity.MONTHLY
+        ? 365
+        : granularity === MetricsGranularity.WEEKLY
+          ? 90
+          : 30;
+
+    const since = new Date(now);
+    since.setDate(since.getDate() - lookbackDays);
+
+    // Fetch historical snapshots
+    const snapshots = await this.snapshotRepository
+      .createQueryBuilder('s')
+      .where('s.productId = :id', { id })
+      .andWhere('s.snapshotDate >= :since', { since })
+      .orderBy('s.snapshotDate', 'ASC')
+      .getMany();
+
+    // Build chart data — fall back to synthetic single-point if no snapshots yet
+    const apyHistory = this.buildApyHistory(snapshots, product, granularity);
+    const tvlHistory = this.buildTvlHistory(snapshots, product, granularity);
+
+    // Subscription stats
+    const allSubs = product.subscriptions ?? [];
+    const activeSubs = allSubs.filter(
+      (s) => s.status === SubscriptionStatus.ACTIVE,
+    );
+    const totalSubscribers = activeSubs.length;
+    const retentionRate =
+      allSubs.length > 0
+        ? Math.round((activeSubs.length / allSubs.length) * 1000) / 10
+        : 0;
+
+    // Current TVL from active subscriptions
+    const currentTvl = activeSubs.reduce(
+      (sum, s) => sum + Number(s.amount),
+      0,
+    );
+
+    // Risk metrics from APY history
+    const apyValues =
+      apyHistory.length > 0
+        ? apyHistory.map((p) => p.apy)
+        : [Number(product.interestRate)];
+    const riskMetrics = this.calculateRiskMetrics(apyValues);
+
+    // Similar products: same riskLevel, different id, active
+    const similar = await this.productRepository.find({
+      where: { riskLevel: product.riskLevel, isActive: true },
+      relations: ['subscriptions'],
+    });
+    const similarProducts = similar
+      .filter((p) => p.id !== id)
+      .slice(0, 5)
+      .map((p) => {
+        const subs = (p.subscriptions ?? []).filter(
+          (s) => s.status === SubscriptionStatus.ACTIVE,
+        );
+        return {
+          id: p.id,
+          name: p.name,
+          apy: Number(p.interestRate),
+          tvl: subs.reduce((sum, s) => sum + Number(s.amount), 0),
+          riskLevel: p.riskLevel,
+        };
+      });
+
+    const metrics: ProductMetricsDto = {
+      productId: id,
+      productName: product.name,
+      currentApy: Number(product.interestRate),
+      currentTvl,
+      totalSubscribers,
+      retentionRate,
+      apyHistory,
+      tvlHistory,
+      riskMetrics,
+      similarProducts,
+      cachedAt: now.toISOString(),
+    };
+
+    await this.cacheManager.set(cacheKey, metrics, METRICS_CACHE_TTL);
+    return metrics;
+  }
+
+  private buildApyHistory(
+    snapshots: ProductApySnapshot[],
+    product: SavingsProduct,
+    granularity: MetricsGranularity,
+  ) {
+    if (snapshots.length === 0) {
+      // No historical data yet — return current rate as single point
+      return [
+        {
+          date: new Date().toISOString().split('T')[0],
+          apy: Number(product.interestRate),
+        },
+      ];
+    }
+
+    const grouped = this.groupSnapshotsByGranularity(snapshots, granularity);
+    return grouped.map(({ date, items }) => ({
+      date,
+      apy:
+        Math.round(
+          (items.reduce((s, i) => s + Number(i.apy), 0) / items.length) * 100,
+        ) / 100,
+    }));
+  }
+
+  private buildTvlHistory(
+    snapshots: ProductApySnapshot[],
+    product: SavingsProduct,
+    granularity: MetricsGranularity,
+  ) {
+    if (snapshots.length === 0) {
+      return [
+        {
+          date: new Date().toISOString().split('T')[0],
+          tvl: Number(product.tvlAmount),
+        },
+      ];
+    }
+
+    const grouped = this.groupSnapshotsByGranularity(snapshots, granularity);
+    return grouped.map(({ date, items }) => ({
+      date,
+      tvl:
+        Math.round(
+          (items.reduce((s, i) => s + Number(i.tvlAmount), 0) /
+            items.length) *
+            100,
+        ) / 100,
+    }));
+  }
+
+  private groupSnapshotsByGranularity(
+    snapshots: ProductApySnapshot[],
+    granularity: MetricsGranularity,
+  ): { date: string; items: ProductApySnapshot[] }[] {
+    const buckets = new Map<string, ProductApySnapshot[]>();
+
+    for (const snap of snapshots) {
+      const d = new Date(snap.snapshotDate);
+      let key: string;
+
+      if (granularity === MetricsGranularity.MONTHLY) {
+        key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      } else if (granularity === MetricsGranularity.WEEKLY) {
+        // ISO week start (Monday)
+        const day = d.getDay() || 7;
+        const monday = new Date(d);
+        monday.setDate(d.getDate() - day + 1);
+        key = monday.toISOString().split('T')[0];
+      } else {
+        key = d.toISOString().split('T')[0];
+      }
+
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(snap);
+    }
+
+    return Array.from(buckets.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, items]) => ({ date, items }));
+  }
+
+  private calculateRiskMetrics(apyValues: number[]) {
+    const n = apyValues.length;
+    const avg = apyValues.reduce((s, v) => s + v, 0) / n;
+    const variance =
+      n > 1
+        ? apyValues.reduce((s, v) => s + Math.pow(v - avg, 2), 0) / (n - 1)
+        : 0;
+    const stdDev = Math.sqrt(variance);
+
+    // Sharpe ratio: (avg return - risk-free rate) / stdDev
+    // Using 0% risk-free rate as a conservative baseline
+    const sharpeRatio =
+      stdDev > 0 ? Math.round((avg / stdDev) * 100) / 100 : 0;
+
+    return {
+      sharpeRatio,
+      apyVolatility: Math.round(stdDev * 100) / 100,
+      maxApy: Math.max(...apyValues),
+      minApy: Math.min(...apyValues),
+      avgApy: Math.round(avg * 100) / 100,
+    };
   }
 
   async invalidatePoolsCache(): Promise<void> {

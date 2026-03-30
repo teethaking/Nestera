@@ -34,6 +34,11 @@ import { CreateGoalDto } from './dto/create-goal.dto';
 import { UpdateGoalDto } from './dto/update-goal.dto';
 import { SavingsProductDto } from './dto/savings-product.dto';
 import { ProductDetailsDto } from './dto/product-details.dto';
+import {
+  MetricsGranularity,
+  ProductMetricsDto,
+  ProductMetricsQueryDto,
+} from './dto/product-metrics.dto';
 import { RecommendationResponseDto } from './dto/recommendation-response.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -127,6 +132,39 @@ export class SavingsController {
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
     };
+  }
+
+  @Get('products/:id/metrics')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(3600000)
+  @ApiOperation({
+    summary: 'Get performance metrics for a savings product',
+    description:
+      'Returns historical APY, TVL trends, user retention, risk-adjusted returns (Sharpe ratio), and similar product comparisons. Cached for 1 hour.',
+  })
+  @ApiParam({
+    name: 'id',
+    type: 'string',
+    format: 'uuid',
+    description: 'Product UUID',
+  })
+  @ApiQuery({
+    name: 'granularity',
+    required: false,
+    enum: MetricsGranularity,
+    description: 'Chart data granularity (daily, weekly, monthly)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Product performance metrics',
+    type: ProductMetricsDto,
+  })
+  @ApiResponse({ status: 404, description: 'Product not found' })
+  async getProductMetrics(
+    @Param('id') id: string,
+    @Query() query: ProductMetricsQueryDto,
+  ): Promise<ProductMetricsDto> {
+    return this.savingsService.getProductMetrics(id, query.granularity);
   }
 
   @Post('subscribe')
