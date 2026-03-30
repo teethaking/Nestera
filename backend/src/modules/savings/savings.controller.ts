@@ -98,7 +98,7 @@ export class SavingsController {
     description: 'Soroban RPC request timeout',
   })
   async getProductDetails(@Param('id') id: string): Promise<ProductDetailsDto> {
-    const { product, totalAssets } =
+    const { product, totalAssets, capacity } =
       await this.savingsService.findProductWithLiveData(id);
 
     const totalAssetsXlm = totalAssets / 10_000_000;
@@ -116,6 +116,11 @@ export class SavingsController {
       contractId: product.contractId,
       totalAssets,
       totalAssetsXlm,
+      maxCapacity: capacity.maxCapacity,
+      utilizedCapacity: capacity.utilizedCapacity,
+      availableCapacity: capacity.availableCapacity,
+      utilizationPercentage: capacity.utilizationPercentage,
+      isFull: capacity.isFull,
       riskLevel: product.riskLevel || RiskLevel.LOW,
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
