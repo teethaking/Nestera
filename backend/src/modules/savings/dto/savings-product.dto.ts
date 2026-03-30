@@ -35,6 +35,9 @@ export class SavingsProductDto {
   @ApiProperty({ description: 'Whether product is active' })
   isActive: boolean;
 
+  @ApiProperty({ description: 'Current product version' })
+  version: number;
+
   @ApiProperty({
     description: 'Risk level classification (e.g. Low, Medium, High)',
     enum: RiskLevel,

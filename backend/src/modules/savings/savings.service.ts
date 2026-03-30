@@ -37,7 +37,8 @@ import { PredictiveEvaluatorService } from './services/predictive-evaluator.serv
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { SavingsProductVersionAudit } from './entities/savings-product-version-audit.entity';
 
 export type SavingsGoalProgress = GoalProgressDto;
 
@@ -66,6 +67,8 @@ export class SavingsService {
     private readonly goalRepository: Repository<SavingsGoal>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(SavingsProductVersionAudit)
+    private readonly productVersionAuditRepository: Repository<SavingsProductVersionAudit>,
     @InjectRepository(WithdrawalRequest)
     private readonly withdrawalRepository: Repository<WithdrawalRequest>,
     @InjectRepository(Transaction)
@@ -85,9 +88,22 @@ export class SavingsService {
     }
     const product = this.productRepository.create({
       ...dto,
+      version: dto.version ?? 1,
       isActive: dto.isActive ?? true,
     });
-    const savedProduct = await this.productRepository.save(product);
+    let savedProduct = await this.productRepository.save(product);
+
+    if (!savedProduct.versionGroupId) {
+      savedProduct.versionGroupId = savedProduct.id;
+      savedProduct = await this.productRepository.save(savedProduct);
+    }
+
+    await this.recordVersionAudit(savedProduct, {
+      action: 'CREATED',
+      sourceProductId: null,
+      targetProductId: savedProduct.id,
+      metadata: { version: savedProduct.version },
+    });
     await this.invalidatePoolsCache();
     return savedProduct;
   }
@@ -109,8 +125,47 @@ export class SavingsService {
         'minAmount must be less than or equal to maxAmount',
       );
     }
+    if (this.requiresNewVersion(product, dto)) {
+      const versionGroupId = product.versionGroupId ?? product.id;
+      product.isActive = false;
+      await this.productRepository.save(product);
+
+      const versionedProduct = this.productRepository.create({
+        ...product,
+        ...dto,
+        id: undefined,
+        createdAt: undefined,
+        updatedAt: undefined,
+        subscriptions: undefined,
+        version: (product.version ?? 1) + 1,
+        versionGroupId,
+        previousVersionId: product.id,
+        isActive: dto.isActive ?? true,
+      });
+      const savedVersion = await this.productRepository.save(versionedProduct);
+      await this.recordVersionAudit(savedVersion, {
+        action: 'VERSION_CREATED',
+        sourceProductId: product.id,
+        targetProductId: savedVersion.id,
+        metadata: {
+          version: savedVersion.version,
+          changedFields: this.getChangedFields(product, dto),
+        },
+      });
+      await this.invalidatePoolsCache();
+      return savedVersion;
+    }
+
     Object.assign(product, dto);
     const updatedProduct = await this.productRepository.save(product);
+    await this.recordVersionAudit(updatedProduct, {
+      action: 'UPDATED',
+      sourceProductId: product.id,
+      targetProductId: updatedProduct.id,
+      metadata: {
+        changedFields: this.getChangedFields(product, dto),
+      },
+    });
     await this.invalidatePoolsCache();
 
     // Emit waitlist availability event when product becomes available or capacity opens
@@ -178,6 +233,7 @@ export class SavingsService {
         tenureMonths: product.tenureMonths,
         contractId: product.contractId,
         isActive: product.isActive,
+        version: product.version ?? 1,
         riskLevel: product.riskLevel || RiskLevel.LOW,
         tvlAmount,
         createdAt: product.createdAt,
@@ -229,6 +285,56 @@ export class SavingsService {
     }
 
     return { product, totalAssets };
+  }
+
+  async migrateSubscriptionsToVersion(
+    sourceProductId: string,
+    targetProductId: string,
+    actorId?: string,
+    subscriptionIds?: string[],
+  ): Promise<{ migratedCount: number; targetProduct: SavingsProduct }> {
+    const [sourceProduct, targetProduct] = await Promise.all([
+      this.findOneProduct(sourceProductId),
+      this.findOneProduct(targetProductId),
+    ]);
+
+    const sourceGroupId = sourceProduct.versionGroupId ?? sourceProduct.id;
+    const targetGroupId = targetProduct.versionGroupId ?? targetProduct.id;
+    if (sourceGroupId !== targetGroupId) {
+      throw new BadRequestException(
+        'Subscriptions can only be migrated within the same product version group',
+      );
+    }
+
+    const where = {
+      productId: sourceProductId,
+      status: SubscriptionStatus.ACTIVE,
+      ...(subscriptionIds?.length ? { id: In(subscriptionIds) } : {}),
+    };
+    const subscriptions = await this.subscriptionRepository.find({ where });
+
+    if (!subscriptions.length) {
+      return { migratedCount: 0, targetProduct };
+    }
+
+    for (const subscription of subscriptions) {
+      subscription.productId = targetProduct.id;
+    }
+    await this.subscriptionRepository.save(subscriptions);
+
+    await this.recordVersionAudit(targetProduct, {
+      action: 'SUBSCRIPTIONS_MIGRATED',
+      actorId: actorId ?? null,
+      sourceProductId,
+      targetProductId,
+      metadata: {
+        migratedCount: subscriptions.length,
+        subscriptionIds: subscriptions.map((subscription) => subscription.id),
+      },
+    });
+
+    await this.invalidatePoolsCache();
+    return { migratedCount: subscriptions.length, targetProduct };
   }
 
   async subscribe(
@@ -764,5 +870,70 @@ export class SavingsService {
     }, 0);
 
     return totalYield / activeSubscriptions.length;
+  }
+
+  private requiresNewVersion(
+    product: SavingsProduct,
+    dto: UpdateProductDto,
+  ): boolean {
+    const versionedFields: Array<keyof UpdateProductDto> = [
+      'interestRate',
+      'minAmount',
+      'maxAmount',
+      'tenureMonths',
+      'description',
+      'type',
+    ];
+
+    return versionedFields.some((field) => {
+      const nextValue = dto[field];
+      return (
+        nextValue !== undefined &&
+        nextValue !== product[field as keyof SavingsProduct]
+      );
+    });
+  }
+
+  private getChangedFields(
+    product: SavingsProduct,
+    dto: UpdateProductDto,
+  ): Record<string, { from: unknown; to: unknown }> {
+    const productRecord = product as unknown as Record<string, unknown>;
+
+    return Object.entries(dto).reduce(
+      (changes, [key, value]) => {
+        if (value !== undefined && value !== productRecord[key]) {
+          changes[key] = {
+            from: productRecord[key],
+            to: value,
+          };
+        }
+        return changes;
+      },
+      {} as Record<string, { from: unknown; to: unknown }>,
+    );
+  }
+
+  private async recordVersionAudit(
+    product: SavingsProduct,
+    options: {
+      action: SavingsProductVersionAudit['action'];
+      actorId?: string | null;
+      sourceProductId: string | null;
+      targetProductId: string | null;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    await this.productVersionAuditRepository.save(
+      this.productVersionAuditRepository.create({
+        productId: product.id,
+        versionGroupId: product.versionGroupId ?? product.id,
+        sourceProductId: options.sourceProductId,
+        targetProductId: options.targetProductId,
+        actorId: options.actorId ?? null,
+        action: options.action,
+        metadata: options.metadata ?? null,
+      }),
+    );
   }
 }

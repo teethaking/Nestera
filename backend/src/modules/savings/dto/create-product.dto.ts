@@ -86,6 +86,16 @@ export class CreateProductDto {
   @IsEnum(RiskLevel)
   riskLevel?: RiskLevel;
 
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'Initial product version',
+    default: 1,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  version?: number;
+
   @ApiPropertyOptional({ default: true })
   @IsOptional()
   isActive?: boolean;

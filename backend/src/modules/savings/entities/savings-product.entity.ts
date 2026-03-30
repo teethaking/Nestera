@@ -54,6 +54,15 @@ export class SavingsProduct {
   @Column('int', { nullable: true })
   capacity: number | null;
 
+  @Column({ type: 'int', default: 1 })
+  version: number;
+
+  @Column({ type: 'uuid', nullable: true })
+  versionGroupId: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  previousVersionId: string | null;
+
   @Column({ default: true })
   isActive: boolean;
 

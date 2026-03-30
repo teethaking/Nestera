@@ -35,6 +35,9 @@ export class ProductDetailsDto {
   @ApiProperty({ description: 'Whether product is active' })
   isActive: boolean;
 
+  @ApiProperty({ description: 'Current product version' })
+  version: number;
+
   @ApiPropertyOptional({ description: 'Soroban vault contract ID' })
   contractId: string | null;
 
