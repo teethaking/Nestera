@@ -54,6 +54,9 @@ export class SavingsProduct {
   @Column('int', { nullable: true })
   capacity: number | null;
 
+  @Column('decimal', { precision: 14, scale: 2, nullable: true })
+  maxCapacity: number | null;
+
   @Column({ default: true })
   isActive: boolean;
 

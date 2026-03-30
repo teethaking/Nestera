@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Post,
   Patch,
   Body,
@@ -23,6 +24,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { ProductCapacitySnapshot } from '../savings/savings.service';
 
 @ApiTags('admin/savings')
 @Controller('admin/savings')
@@ -62,5 +64,17 @@ export class AdminSavingsController {
     @Body() dto: UpdateProductDto,
   ): Promise<SavingsProduct> {
     return await this.savingsService.updateProduct(id, dto);
+  }
+
+  @Get('products/:id/capacity-metrics')
+  @ApiOperation({ summary: 'Get live capacity utilization metrics (admin)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Live capacity metrics',
+  })
+  async getCapacityMetrics(
+    @Param('id') id: string,
+  ): Promise<ProductCapacitySnapshot> {
+    return await this.savingsService.getProductCapacitySnapshot(id);
   }
 }
