@@ -54,7 +54,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RpcThrottleGuard } from '../../common/guards/rpc-throttle.guard';
 import { RecommendationService } from './services/recommendation.service';
 import { AutoDepositService } from './services/auto-deposit.service';
-import { CreateAutoDepositDto, AutoDepositResponseDto } from './dto/auto-deposit.dto';
+import {
+  CreateAutoDepositDto,
+  AutoDepositResponseDto,
+} from './dto/auto-deposit.dto';
 import { AutoDepositSchedule } from './entities/auto-deposit-schedule.entity';
 import {
   SavingsGoalProgress,
@@ -446,6 +449,8 @@ export class SavingsController {
       dto.percentage,
       dto.label,
     );
+  }
+
   // ── Auto-Deposit (#534) ────────────────────────────────────────────────────
 
   @Post('auto-deposit/create')
@@ -454,7 +459,11 @@ export class SavingsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a recurring auto-deposit schedule' })
   @ApiBody({ type: CreateAutoDepositDto })
-  @ApiResponse({ status: 201, description: 'Schedule created', type: AutoDepositResponseDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Schedule created',
+    type: AutoDepositResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'Invalid schedule data' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async createAutoDeposit(
@@ -467,8 +476,14 @@ export class SavingsController {
   @Get('auto-deposit')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'List all auto-deposit schedules for the current user' })
-  @ApiResponse({ status: 200, description: 'List of schedules', type: [AutoDepositResponseDto] })
+  @ApiOperation({
+    summary: 'List all auto-deposit schedules for the current user',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of schedules',
+    type: [AutoDepositResponseDto],
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getAutoDeposits(
     @CurrentUser() user: { id: string; email: string },
@@ -481,7 +496,11 @@ export class SavingsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Pause an auto-deposit schedule' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Schedule paused', type: AutoDepositResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Schedule paused',
+    type: AutoDepositResponseDto,
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Schedule not found' })
   async pauseAutoDeposit(
@@ -507,4 +526,3 @@ export class SavingsController {
     return this.autoDepositService.cancel(id, user.id);
   }
 }
-

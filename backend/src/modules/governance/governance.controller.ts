@@ -40,9 +40,6 @@ export class GovernanceController {
 
   @Get('voting-power')
   @ApiOperation({
-    summary: 'Delegate voting power to another address',
-    description:
-      "Updates the Soroban governance contract to delegate the user's voting power to another Stellar address.",
     summary: 'Get the authenticated user voting power',
     description:
       'Returns the current NST token balance for the authenticated user, representing their voting power in the governance system.',
@@ -65,7 +62,10 @@ export class GovernanceController {
   @ApiResponse({
     status: 201,
     description: 'Delegation set',
-    schema: { type: 'object', properties: { transactionHash: { type: 'string' } } },
+    schema: {
+      type: 'object',
+      properties: { transactionHash: { type: 'string' } },
+    },
   })
   @ApiResponse({ status: 400, description: 'Loop detected or invalid address' })
   delegate(
@@ -83,7 +83,9 @@ export class GovernanceController {
   }
 
   @Get('governance/delegation')
-  @ApiOperation({ summary: 'View current delegation and total delegated power' })
+  @ApiOperation({
+    summary: 'View current delegation and total delegated power',
+  })
   @ApiResponse({
     status: 200,
     description: 'Delegation info',
@@ -97,12 +99,6 @@ export class GovernanceController {
   })
   getMyDelegation(
     @CurrentUser() user: { id: string },
-    @Body() delegateVoteDto: DelegateVoteDto,
-  ): Promise<{ transactionHash: string }> {
-    return this.governanceService.delegateVotingPower(
-      user.id,
-      delegateVoteDto.delegateAddress,
-    );
   ): Promise<{ delegate: string | null; totalDelegatedPower: number }> {
     return this.governanceService.getMyDelegation(user.id);
   }
