@@ -14,6 +14,7 @@ import {
   ProposalType,
 } from './entities/governance-proposal.entity';
 import { Vote, VoteDirection } from './entities/vote.entity';
+import { Delegation } from './entities/delegation.entity';
 import { TransactionsService } from '../transactions/transactions.service';
 import { LedgerTransaction } from '../blockchain/entities/transaction.entity';
 
@@ -44,6 +45,12 @@ describe('GovernanceService', () => {
   };
   let transactionsService: any;
   let transactionRepo: { createQueryBuilder: jest.Mock };
+  let delegationRepo: {
+    findOne: jest.Mock;
+    find: jest.Mock;
+    delete: jest.Mock;
+    upsert: jest.Mock;
+  };
 
   beforeEach(async () => {
     userService = { findById: jest.fn() };
@@ -73,6 +80,12 @@ describe('GovernanceService', () => {
     };
     transactionsService = {};
     transactionRepo = { createQueryBuilder: jest.fn() };
+    delegationRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      find: jest.fn().mockResolvedValue([]),
+      delete: jest.fn().mockResolvedValue(undefined),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -90,6 +103,10 @@ describe('GovernanceService', () => {
         {
           provide: getRepositoryToken(LedgerTransaction),
           useValue: transactionRepo,
+        },
+        {
+          provide: getRepositoryToken(Delegation),
+          useValue: delegationRepo,
         },
       ],
     }).compile();
