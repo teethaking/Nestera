@@ -1,8 +1,11 @@
 "use client";
 
 import React from "react";
+import { useWallet } from "../../context/WalletContext";
 
 const NetWorthCard: React.FC = () => {
+  const { totalUsdValue, isConnected } = useWallet();
+
   return (
     <div
       style={{
@@ -60,13 +63,20 @@ const NetWorthCard: React.FC = () => {
             }}
             className="px-3 py-2 rounded-2xl font-bold text-[#8ef4ef] inline-flex gap-2 items-center text-sm"
           >
-            + $1,240.50{" "}
-            <span className="text-[#cfe] text-xs font-semibold">(+5.4%)</span>
+            + $0.00{" "}
+            <span className="text-[#cfe] text-xs font-semibold">(0.0%)</span>
           </div>
         </div>
 
         <div className="text-5xl font-extrabold mt-3 tracking-tight text-white">
-          $24,593.82
+          {isConnected ? (
+            `$${totalUsdValue.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`
+          ) : (
+            "$0.00"
+          )}
         </div>
 
         <div className="mt-2 text-[#95b7b7] text-sm">vs last month</div>
@@ -76,3 +86,4 @@ const NetWorthCard: React.FC = () => {
 };
 
 export default NetWorthCard;
+

@@ -7,10 +7,15 @@ import { useWallet } from "../../context/WalletContext";
 import NetworkIndicator from "./NetworkIndicator";
 
 const TopNav: React.FC = () => {
-  const { address, network, isConnected, disconnect } = useWallet();
+  const { address, network, isConnected, disconnect, balances } = useWallet();
   const router = useRouter();
   const [showConfirm, setShowConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const xlmBalance = balances.find(b => b.asset_code === "XLM")?.balance || "0";
+  const formattedXlm = parseFloat(xlmBalance).toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  });
 
   const copyToClipboard = () => {
     if (address) {
@@ -75,15 +80,22 @@ const TopNav: React.FC = () => {
           {isConnected && address && shortAddress ? (
             <div className="flex items-center gap-2">
               <div className="flex items-center bg-[#0e2330] border border-white/8 rounded-xl h-[38px] px-3 gap-3">
+                <div className="flex items-center gap-1.5 border-r border-white/10 pr-2">
+                  <span className="text-[#00c9c8] text-xs font-bold font-mono">
+                    {formattedXlm} XLM
+                  </span>
+                </div>
+                
                 <div 
                   className="flex items-center gap-1.5 cursor-help" 
                   title={address}
                 >
-                  <Wallet size={14} className="text-[#00c9c8]" />
-                  <span className="text-[#00c9c8] text-xs font-semibold font-mono">
+                  <Wallet size={14} className="text-[#6a9fae]" />
+                  <span className="text-white text-xs font-semibold font-mono">
                     {shortAddress}
                   </span>
                 </div>
+
                 
                 <div className="flex items-center gap-1.5 border-l border-white/10 pl-2">
                   <button

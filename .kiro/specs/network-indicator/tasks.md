@@ -85,7 +85,7 @@ This implementation plan breaks down the Network Indicator feature into discrete
   - Ensure all tests pass, ask the user if questions arise
 
 - [ ] 6. Integrate NetworkIndicator into TopNav component
-  - [-] 6.1 Modify TopNav to include NetworkIndicator
+  - [ ] 6.1 Modify TopNav to include NetworkIndicator
     - Open `frontend/app/components/dashboard/TopNav.tsx`
     - Import NetworkIndicator component
     - Add NetworkIndicator between wallet address display and disconnect button
