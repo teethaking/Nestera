@@ -9,6 +9,7 @@ import { UserSubscription } from '../savings/entities/user-subscription.entity';
 import { ProcessedStellarEvent } from '../blockchain/entities/processed-event.entity';
 import { LedgerTransaction } from '../blockchain/entities/transaction.entity';
 import { RebalancingExecution } from './entities/rebalancing-execution.entity';
+import { SavingsProduct } from '../savings/entities/savings-product.entity';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { RebalancingExecution } from './entities/rebalancing-execution.entity';
       LedgerTransaction,
       UserSubscription,
       RebalancingExecution,
+      SavingsProduct,
     ]),
     BlockchainModule, // Import to use OracleService for USD conversion
     NotificationsModule,

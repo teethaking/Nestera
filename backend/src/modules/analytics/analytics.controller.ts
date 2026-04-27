@@ -21,15 +21,16 @@ import { RebalancingQueryDto } from './dto/rebalancing-query.dto';
 import { ExecuteRebalancingDto } from './dto/execute-rebalancing.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AnalyticsDateRangeQueryDto } from './dto/analytics-date-range-query.dto';
 
 @ApiTags('analytics')
 @Controller('analytics')
-@UseGuards(JwtAuthGuard)
-@ApiBearerAuth()
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
   @Get('portfolio')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Generate portfolio net worth timeline',
     description:
@@ -57,6 +58,8 @@ export class AnalyticsController {
   }
 
   @Get('allocation')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get asset allocation breakdown for doughnut chart',
     description:
@@ -84,6 +87,8 @@ export class AnalyticsController {
   }
 
   @Get('yield-breakdown')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get yield breakdown by savings pool',
     description:
@@ -102,6 +107,8 @@ export class AnalyticsController {
   }
 
   @Get('rebalancing-suggestions')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get risk-adjusted portfolio rebalancing suggestions',
   })
@@ -120,6 +127,8 @@ export class AnalyticsController {
   }
 
   @Post('rebalancing-suggestions/execute')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Execute one-click portfolio rebalancing',
   })
@@ -132,5 +141,57 @@ export class AnalyticsController {
       user.id,
       body.riskProfile || 'balanced',
     );
+  }
+
+  @Get('financial-summary')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get comprehensive financial summary for authenticated user',
+  })
+  async getFinancialSummary(@CurrentUser() user: { id: string }) {
+    return this.analyticsService.getFinancialSummary(user.id);
+  }
+
+  @Get('transactions/summary')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get transaction analytics summary for a date range',
+  })
+  async getTransactionSummary(
+    @CurrentUser() user: { id: string },
+    @Query() query: AnalyticsDateRangeQueryDto,
+  ) {
+    return this.analyticsService.getTransactionSummary(
+      user.id,
+      query.startDate,
+      query.endDate,
+    );
+  }
+
+  @Get('savings/performance')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get savings performance report with benchmarks',
+  })
+  async getSavingsPerformance(
+    @CurrentUser() user: { id: string },
+    @Query() query: AnalyticsDateRangeQueryDto,
+  ) {
+    return this.analyticsService.getSavingsPerformance(
+      user.id,
+      query.startDate,
+      query.endDate,
+    );
+  }
+
+  @Get('platform/health')
+  @ApiOperation({
+    summary: 'Get public platform health metrics',
+  })
+  async getPlatformHealthMetrics() {
+    return this.analyticsService.getPlatformHealthMetrics();
   }
 }
