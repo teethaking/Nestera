@@ -40,20 +40,37 @@ const TopNav: React.FC = () => {
     router.push("/");
   }
 
+  const normalizedNetwork = network?.toUpperCase();
+  const isTestnet = normalizedNetwork === "TESTNET" || normalizedNetwork === "FUTURENET" || normalizedNetwork === "STANDALONE";
+
   return (
     <>
+      {/* Testnet Warning Banner */}
+      {isConnected && isTestnet && (
+        <div className="fixed top-0 left-0 right-0 h-1 bg-amber-500/50 z-50 animate-pulse" />
+      )}
+      
       <header
-        className="sticky top-0 right-0 flex items-center justify-between bg-transparent z-40 backdrop-blur-sm px-0 md:px-6"
+        className={`sticky top-0 right-0 flex items-center justify-between bg-transparent z-40 backdrop-blur-sm px-0 md:px-6 transition-all duration-300 ${
+          isTestnet ? "border-b border-amber-500/10" : "border-b border-white/5"
+        }`}
         style={{ height: 64 }}
       >
         {/* Left: heading + subtitle */}
         <div className="hidden sm:flex flex-col gap-0.5">
-          <h2
-            className="m-0 text-white font-bold leading-none"
-            style={{ fontSize: 22 }}
-          >
-            Welcome back, Alex
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2
+              className="m-0 text-white font-bold leading-none"
+              style={{ fontSize: 22 }}
+            >
+              Welcome back, Alex
+            </h2>
+            {isConnected && isTestnet && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[10px] font-bold uppercase tracking-wider">
+                Testnet Mode
+              </span>
+            )}
+          </div>
           <p className="m-0 text-[#4e8a96]" style={{ fontSize: 13 }}>
             Here&apos;s your financial overview
           </p>
@@ -61,24 +78,28 @@ const TopNav: React.FC = () => {
 
         {/* Right: icons + wallet + avatar */}
         <div className="flex items-center ml-auto" style={{ gap: 10 }}>
-          {[
-            { Icon: Search, label: "Search" },
-            { Icon: Bell, label: "Notifications" },
-            { Icon: HelpCircle, label: "Help" },
-          ].map(({ Icon, label }) => (
-            <button
-              key={label}
-              aria-label={label}
-              className="flex items-center justify-center text-[#6a9fae] cursor-pointer hover:text-white transition-colors bg-[#0e2330] border border-white/8 rounded-xl"
-              style={{ width: 38, height: 38 }}
-            >
-              <Icon size={16} />
-            </button>
-          ))}
+          {/* Action Icons */}
+          <div className="hidden lg:flex items-center gap-2 mr-2">
+            {[
+              { Icon: Search, label: "Search" },
+              { Icon: Bell, label: "Notifications" },
+              { Icon: HelpCircle, label: "Help" },
+            ].map(({ Icon, label }) => (
+              <button
+                key={label}
+                aria-label={label}
+                className="flex items-center justify-center text-[#6a9fae] cursor-pointer hover:text-white transition-colors bg-[#0e2330] border border-white/8 rounded-xl"
+                style={{ width: 38, height: 38 }}
+              >
+                <Icon size={16} />
+              </button>
+            ))}
+          </div>
 
-          {/* Wallet info + disconnect */}
+          {/* Wallet info + Network + Disconnect */}
           {isConnected && address && shortAddress ? (
             <div className="flex items-center gap-2">
+              {/* Wallet Address & Balance */}
               <div className="flex items-center bg-[#0e2330] border border-white/8 rounded-xl h-[38px] px-3 gap-3">
                 <div className="flex items-center gap-1.5 border-r border-white/10 pr-2">
                   <span className="text-[#00c9c8] text-xs font-bold font-mono">
@@ -96,8 +117,7 @@ const TopNav: React.FC = () => {
                   </span>
                 </div>
 
-                
-                <div className="flex items-center gap-1.5 border-l border-white/10 pl-2">
+                <div className="flex items-center gap-1 pl-1">
                   <button
                     onClick={copyToClipboard}
                     className="text-slate-400 hover:text-[#00c9c8] transition-colors cursor-pointer p-1"
@@ -119,12 +139,13 @@ const TopNav: React.FC = () => {
                 </div>
               </div>
 
-              {/* Network Indicator */}
+              {/* Network Indicator (Badge + Switcher) */}
               <NetworkIndicator 
                 network={network} 
                 isConnected={isConnected} 
               />
 
+              {/* Logout Button */}
               <button
                 aria-label="Disconnect wallet"
                 onClick={() => setShowConfirm(true)}
@@ -135,7 +156,10 @@ const TopNav: React.FC = () => {
                 <LogOut size={15} />
               </button>
             </div>
-          ) : null}
+          ) : (
+            /* Not connected state - could show a connect button here if TopNav is used elsewhere */
+            null
+          )}
 
           {/* Avatar */}
           <div
@@ -146,6 +170,7 @@ const TopNav: React.FC = () => {
           </div>
         </div>
       </header>
+
 
       {/* Disconnect confirmation modal */}
       {showConfirm && (

@@ -13,6 +13,7 @@ import {
   getAddress,
   getNetwork,
   requestAccess,
+  WatchWalletChanges,
 } from "@stellar/freighter-api";
 import { Horizon } from "@stellar/stellar-sdk";
 
@@ -60,6 +61,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   });
 
   const refreshInterval = useRef<NodeJS.Timeout | null>(null);
+  const networkWatcher = useRef<WatchWalletChanges | null>(null);
 
   const getHorizonUrl = (network: string | null) => {
     return network?.toLowerCase() === "public"
@@ -156,6 +158,50 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       if (refreshInterval.current) clearInterval(refreshInterval.current);
     };
   }, [state.address, fetchBalances]);
+
+  // Watch for network changes when wallet is connected
+  useEffect(() => {
+    if (!state.isConnected) {
+      // Clean up watcher when wallet is disconnected
+      if (networkWatcher.current) {
+        try {
+          networkWatcher.current.stop();
+        } catch (error) {
+          console.error("Error stopping network watcher:", error);
+        }
+        networkWatcher.current = null;
+      }
+      return;
+    }
+
+    try {
+      // Initialize watcher to poll every 3 seconds
+      networkWatcher.current = new WatchWalletChanges(3000);
+      
+      networkWatcher.current.watch((changes) => {
+        if (changes.network && changes.network !== state.network) {
+          setState((prevState) => ({
+            ...prevState,
+            network: changes.network,
+          }));
+        }
+      });
+    } catch (error) {
+      console.error("Failed to initialize network watcher:", error);
+    }
+
+    // Cleanup function
+    return () => {
+      if (networkWatcher.current) {
+        try {
+          networkWatcher.current.stop();
+        } catch (error) {
+          console.error("Error stopping network watcher:", error);
+        }
+        networkWatcher.current = null;
+      }
+    };
+  }, [state.isConnected, state.network]);
 
   const connect = useCallback(async () => {
     setState((s) => ({ ...s, isLoading: true, error: null }));

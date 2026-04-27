@@ -155,17 +155,23 @@ export function getNetworkConfig(network: string): NetworkConfig {
   }
 
   // Normalize to uppercase for case-insensitive matching
-  const normalizedNetwork = network.toUpperCase() as StellarNetwork;
+  let normalizedNetwork = network.toUpperCase();
+
+  // Map 'PUBLIC' to 'MAINNET' (Freighter uses 'PUBLIC')
+  if (normalizedNetwork === 'PUBLIC') {
+    normalizedNetwork = 'MAINNET';
+  }
 
   // Check if the network exists in our configurations
   if (normalizedNetwork in NETWORK_CONFIGS) {
-    return NETWORK_CONFIGS[normalizedNetwork];
+    return NETWORK_CONFIGS[normalizedNetwork as StellarNetwork];
   }
 
   // Log warning for unknown network values
   console.warn(`Unknown network value: "${network}". Using default configuration.`);
   return UNKNOWN_NETWORK_CONFIG;
 }
+
 
 /**
  * Type guard to check if a string is a valid StellarNetwork

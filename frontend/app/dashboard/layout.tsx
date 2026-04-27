@@ -4,7 +4,9 @@ import TopNav from "../components/dashboard/TopNav";
 
 export const metadata = {
   title: "Dashboard - Nestera",
+  description: "Manage your Nestera portfolio, track your savings growth, and monitor your active goals in one unified dashboard.",
 };
+
 
 export default function DashboardLayout({
   children,

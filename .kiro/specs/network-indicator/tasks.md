@@ -84,8 +84,8 @@ This implementation plan breaks down the Network Indicator feature into discrete
   - Verify all components render correctly in isolation
   - Ensure all tests pass, ask the user if questions arise
 
-- [ ] 6. Integrate NetworkIndicator into TopNav component
-  - [ ] 6.1 Modify TopNav to include NetworkIndicator
+- [x] 6. Integrate NetworkIndicator into TopNav component
+  - [x] 6.1 Modify TopNav to include NetworkIndicator
     - Open `frontend/app/components/dashboard/TopNav.tsx`
     - Import NetworkIndicator component
     - Add NetworkIndicator between wallet address display and disconnect button
@@ -104,7 +104,7 @@ This implementation plan breaks down the Network Indicator feature into discrete
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 11.1, 11.2, 11.3_
 
 - [ ] 7. Implement network change detection in WalletContext
-  - [ ] 7.1 Add WatchWalletChanges integration to WalletContext
+  - [-] 7.1 Add WatchWalletChanges integration to WalletContext
     - Open `frontend/app/context/WalletContext.tsx`
     - Import `WatchWalletChanges` from @stellar/freighter-api
     - Add useEffect hook to initialize watcher when wallet connects
