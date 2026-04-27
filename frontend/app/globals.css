@@ -160,7 +160,7 @@ body {
   *::after {
     transition-duration: 220ms;
     transition-timing-function: ease;
-    transition-property: background-color, color, border-color, box-shadow, fill, stroke;
+    transition-property: background-color, color, border-color, box-shadow;
   }
 }
 

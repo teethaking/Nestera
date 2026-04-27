@@ -93,8 +93,7 @@ export default function ThemeToggle({
           compact
             ? "h-10 w-10 justify-center"
             : "gap-2 px-3.5 py-2.5 text-sm font-medium",
-          fullWidth && "w-full justify-between",
-          className
+          fullWidth && "w-full justify-between"
         )}
       >
         <span className="inline-flex items-center justify-center">

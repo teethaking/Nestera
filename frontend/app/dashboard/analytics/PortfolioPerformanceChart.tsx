@@ -14,6 +14,15 @@ import { MoreHorizontal, TrendingUp } from "lucide-react";
 import { useTheme } from "../../context/ThemeContext";
 
 const chartData = [
+  { date: "Aug 04", value: 105400 },
+  { date: "Aug 11", value: 106200 },
+  { date: "Aug 18", value: 107850 },
+  { date: "Aug 25", value: 108700 },
+  { date: "Sep 01", value: 110100 },
+  { date: "Sep 08", value: 111450 },
+  { date: "Sep 15", value: 113200 },
+  { date: "Sep 22", value: 114900 },
+  { date: "Sep 29", value: 116500 },
   { date: "Oct 01", value: 118200 },
   { date: "Oct 03", value: 119800 },
   { date: "Oct 05", value: 119500 },
@@ -31,6 +40,12 @@ const chartData = [
   { date: "Oct 30", value: 124800 },
   { date: "Nov 01", value: 124592 },
 ];
+
+const windowDataPointLimit: Record<string, number> = {
+  "7D": 7,
+  "30D": 16,
+  "90D": chartData.length,
+};
 
 type TooltipPayloadItem = {
   value: number;
@@ -130,6 +145,10 @@ export default function PortfolioPerformanceChart() {
   const [selectedWindow, setSelectedWindow] = useState("30D");
   const menuRef = useRef<HTMLDivElement | null>(null);
   const chartTheme = useMemo(() => chartThemeByResolvedTheme[resolvedTheme], [resolvedTheme]);
+  const selectedChartData = useMemo(
+    () => chartData.slice(-windowDataPointLimit[selectedWindow]),
+    [selectedWindow]
+  );
 
   useEffect(() => {
     if (!isMenuOpen) {
@@ -226,7 +245,7 @@ export default function PortfolioPerformanceChart() {
 
       <div className="w-full" style={{ height: 260 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 20, right: 24, bottom: 0, left: 24 }}>
+          <AreaChart data={selectedChartData} margin={{ top: 20, right: 24, bottom: 0, left: 24 }}>
             <defs>
               <linearGradient id="portfolioAreaGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={chartTheme.accent} stopOpacity={0.25} />
