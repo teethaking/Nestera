@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Settings } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Monitor, Moon, Settings, Sun } from "lucide-react";
+import { type Theme, useTheme } from "../../context/ThemeContext";
 
 type Prefs = {
   emailNotifications?: boolean;
@@ -12,9 +13,36 @@ type Prefs = {
   milestoneNotifications?: boolean;
 };
 
+const themeOptions: Array<{
+  value: Theme;
+  label: string;
+  description: string;
+  Icon: typeof Sun;
+}> = [
+  {
+    value: "light",
+    label: "Light",
+    description: "Use brighter surfaces across the app.",
+    Icon: Sun,
+  },
+  {
+    value: "dark",
+    label: "Dark",
+    description: "Keep the existing low-light dashboard feel.",
+    Icon: Moon,
+  },
+  {
+    value: "system",
+    label: "System",
+    description: "Follow your browser or operating system preference.",
+    Icon: Monitor,
+  },
+];
+
 export default function SettingsClient() {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   const [saving, setSaving] = useState(false);
+  const { theme, resolvedTheme, setTheme } = useTheme();
 
   useEffect(() => {
     const load = async () => {
@@ -26,15 +54,14 @@ export default function SettingsClient() {
           const data = await res.json();
           setPrefs(data);
         }
-      } catch (e) {
-        // ignore for now
-      }
+      } catch {}
     };
+
     load();
   }, []);
 
   const toggle = (key: keyof Prefs) => {
-    setPrefs((p) => (p ? { ...p, [key]: !p[key] } : p));
+    setPrefs((current) => (current ? { ...current, [key]: !current[key] } : current));
   };
 
   const save = async () => {
@@ -47,85 +74,158 @@ export default function SettingsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prefs),
       });
-    } catch (e) {
-      // ignore
-    }
+    } catch {}
     setSaving(false);
   };
 
+  const resolvedThemeLabel = useMemo(
+    () => (resolvedTheme === "dark" ? "Dark" : "Light"),
+    [resolvedTheme]
+  );
+
   return (
     <div className="w-full">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-linear-to-b from-[#063d3d] to-[#0a6f6f] flex items-center justify-center text-[#5de0e0]">
+      <div className="mb-6 flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-b from-[var(--color-accent-soft)] to-[var(--color-accent-soft)] text-[var(--color-accent)]">
           <Settings size={20} />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-white m-0">Settings</h1>
-          <p className="text-[#5e8c96] text-sm m-0">
+          <h1 className="m-0 text-2xl font-bold text-[var(--color-text)]">Settings</h1>
+          <p className="m-0 text-sm text-[var(--color-text-soft)]">
             Manage your account preferences
           </p>
         </div>
       </div>
 
-      <div className="bg-linear-to-b from-[rgba(6,18,20,0.45)] to-[rgba(4,12,14,0.35)] border border-[rgba(8,120,120,0.06)] rounded-2xl p-8">
-        <h2 className="text-lg font-semibold text-white mb-4">Notifications</h2>
-        <div className="flex flex-col gap-4 text-left max-w-xl mx-auto">
-          <label className="flex items-center justify-between">
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_1.4fr]">
+        <section className="rounded-2xl border border-[var(--color-border)] bg-linear-to-b from-[var(--color-card-start)] to-[var(--color-card-end)] p-6">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="text-white font-medium">Email Notifications</div>
-              <div className="text-sm text-[#5e8c96]">
-                Receive emails about important account events
-              </div>
+              <h2 className="m-0 text-lg font-semibold text-[var(--color-text)]">Theme preference</h2>
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                Choose how Nestera should look across public pages, dashboard shells, and analytics.
+              </p>
             </div>
-            <input
-              type="checkbox"
+            <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
+              Resolved {resolvedThemeLabel}
+            </span>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {themeOptions.map(({ value, label, description, Icon }) => {
+              const selected = theme === value;
+
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setTheme(value)}
+                  aria-pressed={selected}
+                  className={`flex w-full items-start gap-4 rounded-2xl border p-4 text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-background)] ${
+                    selected
+                      ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
+                      : "border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-border-strong)]"
+                  }`}
+                >
+                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] text-[var(--color-accent)]">
+                    <Icon size={18} />
+                  </span>
+                  <span className="flex-1">
+                    <span className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
+                      {label}
+                      {selected ? (
+                        <span className="rounded-full bg-[var(--color-surface)] px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-[var(--color-accent)]">
+                          Active
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="mt-1 block text-sm text-[var(--color-text-muted)]">
+                      {description}
+                    </span>
+                    {value === "system" ? (
+                      <span className="mt-2 block text-xs text-[var(--color-text-soft)]">
+                        Currently following your device&apos;s {resolvedThemeLabel.toLowerCase()} appearance.
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-[var(--color-border)] bg-linear-to-b from-[var(--color-card-start)] to-[var(--color-card-end)] p-6 md:p-8">
+          <h2 className="mb-4 text-lg font-semibold text-[var(--color-text)]">Notifications</h2>
+          <div className="mx-auto flex max-w-xl flex-col gap-4 text-left">
+            <PreferenceToggle
+              label="Email Notifications"
+              description="Receive emails about important account events"
               checked={!!prefs?.emailNotifications}
               onChange={() => toggle("emailNotifications")}
             />
-          </label>
-
-          <label className="flex items-center justify-between">
-            <div>
-              <div className="text-white font-medium">In-app Notifications</div>
-              <div className="text-sm text-[#5e8c96]">
-                Show notifications inside the app
-              </div>
-            </div>
-            <input
-              type="checkbox"
+            <PreferenceToggle
+              label="In-app Notifications"
+              description="Show notifications inside the app"
               checked={!!prefs?.inAppNotifications}
               onChange={() => toggle("inAppNotifications")}
             />
-          </label>
-
-          <label className="flex items-center justify-between">
-            <div>
-              <div className="text-white font-medium">
-                Goal Milestone Notifications
-              </div>
-              <div className="text-sm text-[#5e8c96]">
-                Receive celebratory messages when goals reach 25%, 50%, 75%, and
-                100%
-              </div>
-            </div>
-            <input
-              type="checkbox"
+            <PreferenceToggle
+              label="Goal Milestone Notifications"
+              description="Receive celebratory messages when goals reach 25%, 50%, 75%, and 100%."
               checked={!!prefs?.milestoneNotifications}
               onChange={() => toggle("milestoneNotifications")}
             />
-          </label>
 
-          <div className="text-right">
-            <button
-              className="px-4 py-2 rounded bg-[#06b6b6] text-black font-semibold"
-              onClick={save}
-              disabled={saving}
-            >
-              {saving ? "Saving..." : "Save Preferences"}
-            </button>
+            <div className="text-right">
+              <button
+                className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-[#061a1a] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                onClick={save}
+                disabled={saving}
+              >
+                {saving ? "Saving..." : "Save Preferences"}
+              </button>
+            </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
+  );
+}
+
+function PreferenceToggle({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+      <div>
+        <div className="font-medium text-[var(--color-text)]">{label}</div>
+        <div className="text-sm text-[var(--color-text-muted)]">{description}</div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onChange}
+        className={`relative inline-flex h-7 w-12 items-center rounded-full border transition-colors ${
+          checked
+            ? "border-[var(--color-accent)] bg-[var(--color-accent)]"
+            : "border-[var(--color-border)] bg-[var(--color-surface-subtle)]"
+        }`}
+      >
+        <span
+          className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+            checked ? "translate-x-6" : "translate-x-1"
+          }`}
+        />
+      </button>
+    </label>
   );
 }

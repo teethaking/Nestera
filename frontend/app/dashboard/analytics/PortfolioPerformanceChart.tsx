@@ -1,18 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AreaChart,
   Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
 } from "recharts";
-import { TrendingUp, MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, TrendingUp } from "lucide-react";
+import { useTheme } from "../../context/ThemeContext";
 
-/* ── Sample data matching the mockup date range ─────────────────────── */
 const chartData = [
   { date: "Oct 01", value: 118200 },
   { date: "Oct 03", value: 119800 },
@@ -32,52 +32,70 @@ const chartData = [
   { date: "Nov 01", value: 124592 },
 ];
 
-/* ── Custom Tooltip ─────────────────────────────────────────────────── */
-interface TooltipPayloadItem {
+type TooltipPayloadItem = {
   value: number;
   payload: { date: string; value: number };
-}
+};
+
+type ChartTheme = {
+  accent: string;
+  accentSoft: string;
+  background: string;
+  text: string;
+  muted: string;
+  grid: string;
+  tooltipBg: string;
+  tooltipBorder: string;
+};
+
+const chartThemeByResolvedTheme: Record<"light" | "dark", ChartTheme> = {
+  light: {
+    accent: "#0891b2",
+    accentSoft: "rgba(8, 145, 178, 0.18)",
+    background: "#ffffff",
+    text: "#0f1f2a",
+    muted: "#4a7080",
+    grid: "rgba(74, 112, 128, 0.12)",
+    tooltipBg: "rgba(255, 255, 255, 0.98)",
+    tooltipBorder: "rgba(8, 145, 178, 0.18)",
+  },
+  dark: {
+    accent: "#00c9c8",
+    accentSoft: "rgba(0, 201, 200, 0.18)",
+    background: "#081418",
+    text: "#ffffff",
+    muted: "#5e8c96",
+    grid: "rgba(94, 140, 150, 0.07)",
+    tooltipBg: "rgba(8, 20, 24, 0.95)",
+    tooltipBorder: "rgba(0, 201, 200, 0.3)",
+  },
+};
 
 function CustomTooltip({
   active,
   payload,
+  theme,
 }: {
   active?: boolean;
   payload?: TooltipPayloadItem[];
-  label?: string;
+  theme: ChartTheme;
 }) {
-  if (!active || !payload || payload.length === 0) return null;
+  if (!active || !payload?.length) return null;
 
   const { date, value } = payload[0].payload;
 
   return (
     <div
       style={{
-        background: "rgba(8, 20, 24, 0.95)",
-        border: "1px solid rgba(0, 242, 254, 0.3)",
-        borderRadius: 8,
+        background: theme.tooltipBg,
+        border: `1px solid ${theme.tooltipBorder}`,
+        borderRadius: 10,
         padding: "10px 14px",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
       }}
     >
-      <p
-        style={{
-          margin: 0,
-          fontSize: 11,
-          color: "#5e8c96",
-          marginBottom: 4,
-        }}
-      >
-        {date}, 2023
-      </p>
-      <p
-        style={{
-          margin: 0,
-          fontSize: 16,
-          fontWeight: 700,
-          color: "#ffffff",
-        }}
-      >
+      <p style={{ margin: 0, fontSize: 11, color: theme.muted, marginBottom: 4 }}>{date}, 2023</p>
+      <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: theme.text }}>
         $
         {value.toLocaleString("en-US", {
           minimumFractionDigits: 2,
@@ -88,145 +106,146 @@ function CustomTooltip({
   );
 }
 
-/* ── Custom Active Dot ──────────────────────────────────────────────── */
-function ActiveDot(props: { cx?: number; cy?: number }) {
-  const { cx = 0, cy = 0 } = props;
+function ActiveDot({
+  cx = 0,
+  cy = 0,
+  theme,
+}: {
+  cx?: number;
+  cy?: number;
+  theme: ChartTheme;
+}) {
   return (
     <g>
-      {/* Outer glow */}
-      <circle cx={cx} cy={cy} r={10} fill="rgba(0,242,254,0.15)" />
-      {/* Ring */}
-      <circle
-        cx={cx}
-        cy={cy}
-        r={5}
-        fill="#081418"
-        stroke="#00f2fe"
-        strokeWidth={2}
-      />
-      {/* Vertical guide line */}
-      <line
-        x1={cx}
-        y1={cy + 10}
-        x2={cx}
-        y2={300}
-        stroke="rgba(0,242,254,0.25)"
-        strokeWidth={1}
-        strokeDasharray="3 3"
-      />
+      <circle cx={cx} cy={cy} r={10} fill={theme.accentSoft} />
+      <circle cx={cx} cy={cy} r={5} fill={theme.background} stroke={theme.accent} strokeWidth={2} />
+      <line x1={cx} y1={cy + 10} x2={cx} y2={300} stroke={theme.accentSoft} strokeWidth={1} strokeDasharray="3 3" />
     </g>
   );
 }
 
-/* ── Main Component ─────────────────────────────────────────────────── */
 export default function PortfolioPerformanceChart() {
+  const { resolvedTheme } = useTheme();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [selectedWindow, setSelectedWindow] = useState("30D");
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const chartTheme = useMemo(() => chartThemeByResolvedTheme[resolvedTheme], [resolvedTheme]);
+
+  useEffect(() => {
+    if (!isMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMenuOpen]);
 
   return (
-    <div
-      className="relative overflow-hidden rounded-2xl border"
-      style={{
-        background:
-          "linear-gradient(180deg, rgba(6,18,20,0.85) 0%, rgba(4,12,14,0.75) 100%)",
-        borderColor: "rgba(8,120,120,0.12)",
-      }}
-    >
-      {/* ── Header ─────────────────────────────────────────────────── */}
+    <div className="relative overflow-hidden rounded-2xl border border-[var(--color-border)] bg-linear-to-b from-[var(--color-card-start)] to-[var(--color-card-end)]">
       <div className="flex items-start justify-between px-6 pt-6 pb-2">
-        {/* Left section */}
         <div>
-          <p
-            className="text-[11px] tracking-[0.15em] uppercase m-0 mb-1"
-            style={{ color: "#5e8c96" }}
-          >
+          <p className="m-0 mb-1 text-[11px] uppercase tracking-[0.15em] text-[var(--color-text-muted)]">
             Total Portfolio Value
           </p>
-          <div className="flex items-center gap-3 flex-wrap">
-            <h2
-              className="text-[32px] font-bold m-0 leading-tight"
-              style={{ color: "#ffffff" }}
-            >
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="m-0 text-[32px] leading-tight font-bold text-[var(--color-text)]">
               $124,592.45
             </h2>
-            <span
-              className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold"
-              style={{
-                background: "rgba(0, 242, 254, 0.1)",
-                color: "#00f2fe",
-                border: "1px solid rgba(0, 242, 254, 0.15)",
-              }}
-            >
+            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-xs font-semibold text-[var(--color-accent)]">
               <TrendingUp size={12} />
               +12.4%
             </span>
           </div>
         </div>
 
-        {/* Right – overflow menu */}
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="p-1.5 rounded-lg transition-colors cursor-pointer"
-          style={{
-            color: "#5e8c96",
-            background: "transparent",
-            border: "none",
-          }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "rgba(0,242,254,0.08)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
-          aria-label="More options"
-        >
-          <MoreHorizontal size={18} />
-        </button>
+        <div ref={menuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setIsMenuOpen((current) => !current)}
+            className="rounded-lg p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)]"
+            aria-label="Portfolio performance options"
+            aria-expanded={isMenuOpen}
+            aria-haspopup="menu"
+          >
+            <MoreHorizontal size={18} />
+          </button>
+
+          {isMenuOpen ? (
+            <div
+              role="menu"
+              aria-label="Portfolio time range"
+              className="absolute right-0 top-full z-20 mt-2 min-w-[150px] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-1.5 shadow-xl"
+            >
+              {["7D", "30D", "90D"].map((windowLabel) => {
+                const selected = selectedWindow === windowLabel;
+                return (
+                  <button
+                    key={windowLabel}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    onClick={() => {
+                      setSelectedWindow(windowLabel);
+                      setIsMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center rounded-xl px-3 py-2 text-sm ${
+                      selected
+                        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                        : "text-[var(--color-text)] hover:bg-[var(--color-surface-subtle)]"
+                    }`}
+                  >
+                    {windowLabel}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      {/* ── Chart ──────────────────────────────────────────────────── */}
+      <div className="px-6 pb-1 text-sm text-[var(--color-text-soft)]">
+        Viewing the last {selectedWindow.toLowerCase()} of portfolio movement.
+      </div>
+
       <div className="w-full" style={{ height: 260 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart
-            data={chartData}
-            margin={{ top: 20, right: 24, bottom: 0, left: 24 }}
-          >
+          <AreaChart data={chartData} margin={{ top: 20, right: 24, bottom: 0, left: 24 }}>
             <defs>
-              <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#00f2fe" stopOpacity={0.25} />
-                <stop offset="60%" stopColor="#00f2fe" stopOpacity={0.06} />
-                <stop offset="100%" stopColor="#00f2fe" stopOpacity={0} />
+              <linearGradient id="portfolioAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={chartTheme.accent} stopOpacity={0.25} />
+                <stop offset="60%" stopColor={chartTheme.accent} stopOpacity={0.06} />
+                <stop offset="100%" stopColor={chartTheme.accent} stopOpacity={0} />
               </linearGradient>
             </defs>
 
-            <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="rgba(94,140,150,0.07)"
-              vertical={false}
-            />
-
-            <XAxis
-              dataKey="date"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: "#3d6a75", fontSize: 11 }}
-              dy={10}
-              interval={1}
-            />
-
+            <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} vertical={false} />
+            <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: chartTheme.muted, fontSize: 11 }} dy={10} interval={1} />
             <YAxis hide domain={["dataMin - 2000", "dataMax + 1000"]} />
-
-            <Tooltip
-              content={<CustomTooltip />}
-              cursor={false}
-            />
-
+            <Tooltip content={<CustomTooltip theme={chartTheme} />} cursor={false} />
             <Area
               type="monotone"
               dataKey="value"
-              stroke="#00f2fe"
+              stroke={chartTheme.accent}
               strokeWidth={2}
-              fill="url(#areaGrad)"
-              activeDot={<ActiveDot />}
+              fill="url(#portfolioAreaGrad)"
+              activeDot={<ActiveDot theme={chartTheme} />}
               dot={false}
             />
           </AreaChart>
