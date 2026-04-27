@@ -169,7 +169,7 @@ export class SavingsController {
   async compareProducts(
     @Body() dto: CompareProductsDto,
   ): Promise<ProductComparisonResponseDto> {
-    return this.savingsService.compareProducts(dto.productIds);
+    return this.savingsService.compareProducts(dto.productIds, dto.amount, dto.duration);
   }
 
   @Get('products/:id/metrics')

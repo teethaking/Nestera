@@ -316,7 +316,7 @@ export class SavingsService {
    */
   async compareProducts(
     productIds: string[],
-    amount?: number,
+    amount: number,
     duration?: number,
   ): Promise<ProductComparisonResponseDto> {
     const cacheKey = `compare:${[...productIds].sort().join(',')}:${amount ?? ''}:${duration ?? ''}`;
@@ -339,26 +339,53 @@ export class SavingsService {
       );
     }
 
-    const items: ProductComparisonItemDto[] = products.map((product) => ({
-      id: product.id,
-      name: product.name,
-      type: product.type,
-      description: product.description,
-      apy: Number(product.interestRate),
-      tenure: product.tenureMonths,
-      riskLevel: deriveRiskLevel(product.type),
-      minAmount: Number(product.minAmount),
-      maxAmount: Number(product.maxAmount),
-      isActive: product.isActive,
-      contractId: product.contractId,
-      historicalPerformance: buildHistoricalPerformance(
-        Number(product.interestRate),
-      ),
-    }));
+    const items: ProductComparisonItemDto[] = products.map((product) => {
+      const apy = Number(product.interestRate);
+      const productDuration = duration ?? product.tenureMonths ?? 12;
+
+      const projectedEarnings = this.calculateProjectedEarnings(
+        amount,
+        apy,
+        productDuration,
+      );
+
+      return {
+        id: product.id,
+        name: product.name,
+        type: product.type,
+        description: product.description,
+        apy,
+        tenure: product.tenureMonths,
+        riskLevel: deriveRiskLevel(product.type),
+        minAmount: Number(product.minAmount),
+        maxAmount: Number(product.maxAmount),
+        isActive: product.isActive,
+        contractId: product.contractId,
+        historicalPerformance: buildHistoricalPerformance(apy),
+        projectedEarnings,
+      };
+    });
+
+    // Recommendation logic: Highest projected return, considering risk level as tie-breaker
+    const recommendedProduct = [...items].sort((a, b) => {
+      // Primary: Projected Earnings (Descending)
+      if (b.projectedEarnings !== a.projectedEarnings) {
+        return b.projectedEarnings - a.projectedEarnings;
+      }
+      // Secondary: Risk Level (Ascending: low < medium < high)
+      const riskOrder = { low: 0, medium: 1, high: 2 };
+      return riskOrder[a.riskLevel] - riskOrder[b.riskLevel];
+    })[0];
 
     const response: ProductComparisonResponseDto = {
       products: items,
       cached: false,
+      recommendation: recommendedProduct
+        ? {
+            productId: recommendedProduct.id,
+            reason: `Based on your ${amount} XLM investment, ${recommendedProduct.name} offers the best balance of projected returns (${recommendedProduct.projectedEarnings} XLM after 1% fee) and ${recommendedProduct.riskLevel} risk over ${duration ?? recommendedProduct.tenure ?? 12} months.`,
+          }
+        : undefined,
     };
 
     await this.cacheManager.set(cacheKey, response, COMPARE_CACHE_TTL_MS);
@@ -1427,5 +1454,31 @@ export class SavingsService {
     }
 
     return product;
+  }
+
+  private calculateProjectedEarnings(
+    amount: number,
+    apy: number,
+    durationMonths: number,
+  ): number {
+    const rateDecimal = apy / 100;
+    const compoundingPeriodsPerYear = 12;
+    const timeInYears = durationMonths / 12;
+
+    // A = P(1 + r/n)^(nt)
+    const projectedBalance =
+      amount *
+      Math.pow(
+        1 + rateDecimal / compoundingPeriodsPerYear,
+        compoundingPeriodsPerYear * timeInYears,
+      );
+
+    const earnings = projectedBalance - amount;
+    
+    // Applying a 1% protocol fee impact as assumed in AdminAnalyticsService
+    const netEarnings = earnings * 0.99;
+
+    // Round to 7 decimals (Stellar precision)
+    return Number(netEarnings.toFixed(7));
   }
 }
