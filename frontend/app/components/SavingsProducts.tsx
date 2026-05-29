@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 
 interface ProductCardProps {
   icon: React.ReactNode;
@@ -11,13 +12,13 @@ const ProductCard: React.FC<ProductCardProps> = ({ icon, title, description }) =
     <div className="w-11 h-11 bg-[rgba(0,212,192,0.08)] rounded-lg flex items-center justify-center text-[#00d4c0]">
       {icon}
     </div>
-    <div className="flex flex-col gap-2">
-      <h3 className="text-xl font-bold text-white">{title}</h3>
-      <p className="text-[0.9rem] text-[rgba(180,210,210,0.65)] leading-relaxed">{description}</p>
-      <a href="#" className="text-[#00d4c0] font-semibold flex items-center gap-2 text-[0.95rem] no-underline mt-3">
-        Learn More <span className="text-xl">→</span>
-      </a>
-    </div>
+<div className="flex flex-col gap-2">
+        <h3 className="text-xl font-bold text-white">{title}</h3>
+        <p className="text-[0.9rem] text-[rgba(180,210,210,0.65)] leading-relaxed">{description}</p>
+        <a href="#" className="text-[#00d4c0] font-semibold flex items-center gap-2 text-[0.95rem] no-underline mt-3" aria-label={`Learn more about ${title}`}>
+          Learn More <span className="text-xl" aria-hidden="true">→</span>
+        </a>
+      </div>
   </div>
 );
 
@@ -83,10 +84,14 @@ const SavingsProducts: React.FC = () => {
         <div className="grid grid-cols-2 lg:grid-cols-2 gap-[60px] items-center max-lg:grid-cols-1 max-lg:gap-12">
           {/* MOCKUP */}
           <div className="group relative w-full rounded-3xl overflow-hidden aspect-[16/10] flex items-center justify-center bg-[#061a1a]">
-            <img
+            <Image
               src="/mockup.png"
               alt="Nestera Mobile App Mockup"
-              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.02]"
+              fill
+              sizes="(max-width: 768px) 100vw, 520px"
+              className="object-cover transition-transform duration-500 group-hover:scale-[1.02]"
+              loading="lazy"
+              quality={85}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[rgba(0,13,13,0.4)] to-transparent" />
             <div className="absolute bottom-6 left-6 right-6 flex justify-between items-end">

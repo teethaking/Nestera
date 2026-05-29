@@ -252,28 +252,32 @@ export default function GoalBasedSavingsPage() {
               Sort: {sortBy}
               <ChevronDown size={14} className="opacity-70" />
             </button>
-            <div className="flex bg-[#0e2330] p-1 rounded-xl border border-white/5">
-              <button
-                type="button"
-                onClick={() => setViewMode("grid")}
-                className={`p-2 rounded-lg transition-colors ${viewMode === "grid"
-                  ? "bg-cyan-500/10 text-cyan-400"
-                  : "text-[#5e8c96] hover:text-white"
-                  }`}
-              >
-                <LayoutGrid size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("list")}
-                className={`p-2 rounded-lg transition-colors ${viewMode === "list"
-                  ? "bg-cyan-500/10 text-cyan-400"
-                  : "text-[#5e8c96] hover:text-white"
-                  }`}
-              >
-                <List size={18} />
-              </button>
-            </div>
+<div className="flex bg-[#0e2330] p-1 rounded-xl border border-white/5" role="group" aria-label="View mode toggle">
+               <button
+                 type="button"
+                 onClick={() => setViewMode("grid")}
+                 className={`p-2 rounded-lg transition-colors ${viewMode === "grid"
+                   ? "bg-cyan-500/10 text-cyan-400"
+                   : "text-[#5e8c96] hover:text-white"
+                   }`}
+                 aria-label="Grid view"
+                 aria-pressed={viewMode === "grid"}
+               >
+                 <LayoutGrid size={18} />
+               </button>
+               <button
+                 type="button"
+                 onClick={() => setViewMode("list")}
+                 className={`p-2 rounded-lg transition-colors ${viewMode === "list"
+                   ? "bg-cyan-500/10 text-cyan-400"
+                   : "text-[#5e8c96] hover:text-white"
+                   }`}
+                 aria-label="List view"
+                 aria-pressed={viewMode === "list"}
+               >
+                 <List size={18} />
+               </button>
+             </div>
           </div>
         </div>
 

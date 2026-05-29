@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 
 
 interface HeroStat {
@@ -95,7 +96,15 @@ const Hero: React.FC<HeroProps> = ({
         {/* ── RIGHT: Image ── */}
         <div className="flex-1 flex items-center justify-center max-w-[560px] max-[700px]:max-w-full max-[700px]:w-full">
           <div className="w-full max-w-[520px] bg-[#000d0d] rounded-[20px] overflow-hidden aspect-[1/0.85] flex items-center justify-center max-[700px]:max-w-full">
-            <img src={imageSrc} alt={imageAlt} className="w-full h-full object-cover block" />
+            <Image
+              src={imageSrc}
+              alt={imageAlt}
+              fill
+              sizes="(max-width: 768px) 100vw, 520px"
+              className="object-cover"
+              priority
+              quality={85}
+            />
           </div>
         </div>
 

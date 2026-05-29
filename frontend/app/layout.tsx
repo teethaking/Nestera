@@ -16,6 +16,21 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "/",
   },
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: BASE_URL,
+    title: "Nestera - Decentralized Savings on Stellar",
+    description: "Secure, transparent savings powered by Stellar & Soroban",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Nestera - Decentralized Savings on Stellar",
+      },
+    ],
+  },
   twitter: {
     card: "summary_large_image",
     title: "Nestera - Decentralized Savings on Stellar",

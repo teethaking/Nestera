@@ -214,13 +214,13 @@ export default function TransactionHistoryPage() {
         )}
 
         <div className="flex flex-wrap items-center justify-end gap-4 px-5 py-4 text-sm font-semibold">
-          <button className="min-h-11 text-[#5e8c96] transition-colors hover:text-[#e2f8f8]">
+          <button className="min-h-11 text-[#5e8c96] transition-colors hover:text-[#e2f8f8]" aria-label="Previous page">
             &lt; Prev
           </button>
-          <span className="rounded-lg bg-[rgba(6,110,110,0.2)] px-4 py-1.5 text-[#e2f8f8]">
+          <span className="rounded-lg bg-[rgba(6,110,110,0.2)] px-4 py-1.5 text-[#e2f8f8]" aria-label="Page 1 of 12">
             Page 1 of 12
           </span>
-          <button className="flex min-h-11 items-center gap-1 text-[#e2f8f8] transition-colors hover:text-[#8ef4ef]">
+          <button className="flex min-h-11 items-center gap-1 text-[#e2f8f8] transition-colors hover:text-[#8ef4ef]" aria-label="Next page">
             Next &gt;
           </button>
         </div>
