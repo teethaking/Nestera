@@ -27,6 +27,7 @@ mod upgrade;
 mod users;
 
 mod security;
+pub mod roles;
 
 mod rates;
 mod views;
@@ -520,9 +521,45 @@ impl NesteraContract {
         Ok(())
     }
 
+    // ========== Role-Based Access Control (#878) ==========
+
+    /// Grants `role` to `account`. Only callable by the stored admin.
+    pub fn grant_role(
+        env: Env,
+        caller: Address,
+        role: Symbol,
+        account: Address,
+    ) -> Result<(), SavingsError> {
+        roles::grant_role(&env, &caller, &role, &account)
+    }
+
+    /// Revokes `role` from `account`. Only callable by the stored admin.
+    pub fn revoke_role(
+        env: Env,
+        caller: Address,
+        role: Symbol,
+        account: Address,
+    ) -> Result<(), SavingsError> {
+        roles::revoke_role(&env, &caller, &role, &account)
+    }
+
+    /// Returns `true` if `account` currently holds `role`.
+    pub fn has_role(env: Env, role: Symbol, account: Address) -> bool {
+        roles::has_role(&env, &role, &account)
+    }
+
+    /// Returns all addresses that hold `role`.
+    pub fn get_role_members(env: Env, role: Symbol) -> Vec<Address> {
+        roles::get_role_members(&env, &role)
+    }
+
     pub fn pause(env: Env, caller: Address) -> Result<(), SavingsError> {
         caller.require_auth();
-        governance::validate_admin_or_governance(&env, &caller)?;
+        let is_admin_or_gov = governance::validate_admin_or_governance(&env, &caller).is_ok();
+        let is_pauser = roles::has_role(&env, &roles::role_pauser(), &caller);
+        if !is_admin_or_gov && !is_pauser {
+            return Err(SavingsError::Unauthorized);
+        }
 
         env.storage().persistent().set(&DataKey::Paused, &true);
         ttl::extend_config_ttl(&env, &DataKey::Paused);
@@ -532,7 +569,11 @@ impl NesteraContract {
 
     pub fn unpause(env: Env, caller: Address) -> Result<(), SavingsError> {
         caller.require_auth();
-        governance::validate_admin_or_governance(&env, &caller)?;
+        let is_admin_or_gov = governance::validate_admin_or_governance(&env, &caller).is_ok();
+        let is_pauser = roles::has_role(&env, &roles::role_pauser(), &caller);
+        if !is_admin_or_gov && !is_pauser {
+            return Err(SavingsError::Unauthorized);
+        }
 
         env.storage().persistent().set(&DataKey::Paused, &false);
         ttl::extend_config_ttl(&env, &DataKey::Paused);
