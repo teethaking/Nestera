@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MetricsService } from './metrics.service';
 import { DistributedTracingService, TraceContext } from './distributed-tracing.service';
@@ -28,7 +28,7 @@ export interface AlertRule {
 }
 
 @Injectable()
-export class ApmService implements OnModuleInit {
+export class ApmService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ApmService.name);
   private readonly errorRegistry = new Map<string, ErrorEvent>();
   private readonly alertRules: AlertRule[] = [];
@@ -38,6 +38,7 @@ export class ApmService implements OnModuleInit {
     timestamp: Date;
     severity: string;
   }> = [];
+  private alertEvaluationTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly metricsService: MetricsService,
@@ -48,6 +49,13 @@ export class ApmService implements OnModuleInit {
   onModuleInit() {
     this.setupDefaultAlertRules();
     this.startAlertEvaluationLoop();
+  }
+
+  onModuleDestroy(): void {
+    if (this.alertEvaluationTimer) {
+      clearInterval(this.alertEvaluationTimer);
+      this.alertEvaluationTimer = null;
+    }
   }
 
   private setupDefaultAlertRules() {
@@ -83,7 +91,7 @@ export class ApmService implements OnModuleInit {
   }
 
   private startAlertEvaluationLoop() {
-    setInterval(() => {
+    this.alertEvaluationTimer = setInterval(() => {
       this.evaluateAlerts();
     }, 60_000);
   }

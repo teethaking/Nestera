@@ -120,4 +120,33 @@ export class TransactionsController {
   async bulkTag(@CurrentUser() user: { id: string }, @Body() body: BulkTagDto) {
     return this.transactionsService.bulkTag(user.id, body);
   }
+
+  @Post(':id/auto-categorize')
+  @ApiOperation({ summary: 'Auto-categorize a single transaction' })
+  @ApiParam({ name: 'id', description: 'Transaction UUID' })
+  @ApiResponse({ status: 200, description: 'Transaction categorized' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Transaction not found' })
+  async autoCategorizeTransaction(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+  ) {
+    return this.transactionsService.autoCategorizeTransaction(user.id, id);
+  }
+
+  @Post('auto-categorize-all')
+  @ApiOperation({ summary: 'Auto-categorize all uncategorized transactions' })
+  @ApiResponse({ status: 200, description: 'Transactions categorized' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async autoCategorizeAll(@CurrentUser() user: { id: string }) {
+    return this.transactionsService.autoCategorizeAll(user.id);
+  }
+
+  @Get('analytics')
+  @ApiOperation({ summary: 'Get tag and category analytics' })
+  @ApiResponse({ status: 200, description: 'Tag and category statistics' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getAnalytics(@CurrentUser() user: { id: string }) {
+    return this.transactionsService.getTagAnalytics(user.id);
+  }
 }

@@ -1,22 +1,62 @@
 import React from "react";
-import { MoreHorizontal, PieChart } from "lucide-react";
+import { MoreHorizontal, PieChart, Download } from "lucide-react";
 import PortfolioPerformanceChart from "./PortfolioPerformanceChart";
 
 export const metadata = { title: "Analytics – Nestera" };
 
+const ALLOCATION = [
+  { asset: "USDC", percent: 40, color: "bg-cyan-400" },
+  { asset: "XLM", percent: 35, color: "bg-blue-400" },
+  { asset: "ETH", percent: 25, color: "bg-violet-400" },
+];
+
+const YIELD_POOLS = [
+  { label: "XLM Staking", amount: 420.50, progress: 57 },
+  { label: "USDC Flexible", amount: 322.70, progress: 43 },
+];
+
+function toCsv(rows: Record<string, unknown>[]): string {
+  if (!rows.length) return "";
+  const headers = Object.keys(rows[0]);
+  const escape = (v: unknown) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s; };
+  return [headers.join(","), ...rows.map((r) => headers.map((h) => escape(r[h])).join(","))].join("\n") + "\n";
+}
+
+function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
+  const blob = new Blob([toCsv(rows)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function AnalyticsPage() {
+  const stamp = new Date().toISOString().slice(0, 10);
+
+  function exportAnalytics() {
+    downloadCsv(`nestera-analytics-${stamp}.csv`, [
+      ...ALLOCATION.map((r) => ({ section: "allocation", asset: r.asset, "percent_%": r.percent })),
+      ...YIELD_POOLS.map((r) => ({ section: "yield", pool: r.label, "earned_usd": r.amount, "progress_%": r.progress })),
+    ]);
+  }
   return (
     <div className="w-full">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-linear-to-b from-[#063d3d] to-[#0a6f6f] flex items-center justify-center text-[#5de0e0]">
-          <PieChart size={20} />
+      <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-linear-to-b from-[#063d3d] to-[#0a6f6f] flex items-center justify-center text-[#5de0e0]">
+            <PieChart size={20} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-white m-0">Analytics</h1>
+            <p className="text-[#5e8c96] text-sm m-0">Portfolio performance and insights</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-white m-0">Analytics</h1>
-          <p className="text-[#5e8c96] text-sm m-0">
-            Portfolio performance and insights
-          </p>
-        </div>
+        <button
+          onClick={exportAnalytics}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 font-semibold rounded-xl transition-all active:scale-95 text-sm"
+        >
+          <Download size={15} /> Export CSV
+        </button>
       </div>
 
       <PortfolioPerformanceChart />
@@ -46,11 +86,7 @@ export default function AnalyticsPage() {
           </div>
 
           <div className="space-y-3">
-            {[
-              { asset: "USDC", percent: 40, color: "bg-cyan-400" },
-              { asset: "XLM", percent: 35, color: "bg-blue-400" },
-              { asset: "ETH", percent: 25, color: "bg-violet-400" },
-            ].map((item) => (
+            {ALLOCATION.map((item) => (
               <div key={item.asset} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2 text-[#d8f3f6]">
                   <span className={`w-2.5 h-2.5 rounded-full ${item.color}`} />
@@ -81,14 +117,11 @@ export default function AnalyticsPage() {
           </div>
 
           <div className="space-y-4 mt-5">
-            {[
-              { label: "XLM Staking", amount: "+$420.50", progress: 57 },
-              { label: "USDC Flexible", amount: "+$322.70", progress: 43 },
-            ].map((pool) => (
+            {YIELD_POOLS.map((pool) => (
               <div key={pool.label}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm text-[#d8f3f6]">{pool.label}</span>
-                  <span className="text-sm font-semibold text-emerald-300">{pool.amount}</span>
+                  <span className="text-sm font-semibold text-emerald-300">+${pool.amount.toFixed(2)}</span>
                 </div>
                 <div className="h-2 rounded-full bg-[#0d2530] overflow-hidden">
                   <div

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { UserService } from '../user/user.service';
 import { StellarService } from '../blockchain/stellar.service';
+import { ShutdownTrackedTask } from '../../common/decorators/shutdown-task.decorator';
 
 @Injectable()
 export class SweepTasksService {
@@ -13,6 +14,7 @@ export class SweepTasksService {
   ) {}
 
   // Runs every minute; adjust schedule as needed
+  @ShutdownTrackedTask()
   @Cron(CronExpression.EVERY_MINUTE)
   async handleSweep() {
     this.logger.log('Starting sweep job');

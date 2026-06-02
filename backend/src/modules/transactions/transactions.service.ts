@@ -8,12 +8,14 @@ import { TransactionQueryDto } from './dto/transaction-query.dto';
 import { TransactionResponseDto } from './dto/transaction-response.dto';
 import { PageDto } from '../../common/dto/page.dto';
 import { PageMetaDto } from '../../common/dto/page-meta.dto';
+import { AutoCategorizationService } from './auto-categorization.service';
 
 @Injectable()
 export class TransactionsService {
   constructor(
     @InjectRepository(LedgerTransaction)
     private readonly transactionRepository: Repository<LedgerTransaction>,
+    private readonly autoCategorizationService: AutoCategorizationService,
   ) {}
 
   async findAllForUser(
@@ -285,5 +287,71 @@ export class TransactionsService {
     // Check if poolId corresponds to a known asset
     // For now, default to USDC as it's the primary asset
     return 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA';
+  }
+
+  async autoCategorizeTransaction(userId: string, transactionId: string) {
+    const tx = await this.transactionRepository.findOne({
+      where: { id: transactionId, userId },
+    });
+
+    if (!tx) {
+      return { ok: false, message: 'Transaction not found' };
+    }
+
+    const category = this.autoCategorizationService.predictCategory(tx.metadata);
+    if (category) {
+      tx.category = category;
+      await this.transactionRepository.save(tx);
+    }
+
+    return { ok: true, transaction: this.transformToResponseDto(tx) };
+  }
+
+  async autoCategorizeAll(userId: string) {
+    const txs = await this.transactionRepository.findBy({
+      userId,
+      category: null,
+    });
+
+    let updatedCount = 0;
+    for (const tx of txs) {
+      const category = this.autoCategorizationService.predictCategory(tx.metadata);
+      if (category) {
+        tx.category = category;
+        updatedCount++;
+      }
+    }
+
+    if (updatedCount > 0) {
+      await this.transactionRepository.save(txs);
+    }
+
+    return { ok: true, updated: updatedCount };
+  }
+
+  async getTagAnalytics(userId: string) {
+    const tagCounts = await this.transactionRepository
+      .createQueryBuilder('transaction')
+      .select('unnest(transaction.tags)', 'tag')
+      .addSelect('COUNT(*)', 'count')
+      .where('transaction.userId = :userId', { userId })
+      .groupBy('tag')
+      .orderBy('count', 'DESC')
+      .getRawMany();
+
+    const categoryStats = await this.transactionRepository
+      .createQueryBuilder('transaction')
+      .select('transaction.category', 'category')
+      .addSelect('COUNT(*)', 'count')
+      .where('transaction.userId = :userId', { userId })
+      .andWhere('transaction.category IS NOT NULL')
+      .groupBy('transaction.category')
+      .orderBy('count', 'DESC')
+      .getRawMany();
+
+    return {
+      tags: tagCounts.map(t => ({ tag: t.tag, count: parseInt(t.count) })),
+      categories: categoryStats.map(c => ({ category: c.category, count: parseInt(c.count) })),
+    };
   }
 }

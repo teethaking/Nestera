@@ -16,6 +16,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { AuditLog } from '../../common/entities/audit-log.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ShutdownTrackedTask } from '../../common/decorators/shutdown-task.decorator';
 
 const pipelineAsync = promisify(pipeline);
 
@@ -77,6 +78,7 @@ export class AdminAuditLogsArchivalService {
   /**
    * Daily archival job — runs at 01:00 UTC
    */
+  @ShutdownTrackedTask()
   @Cron('0 1 * * *')
   async archiveOldLogs(): Promise<void> {
     try {

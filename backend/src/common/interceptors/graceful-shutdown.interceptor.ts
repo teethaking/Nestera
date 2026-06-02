@@ -16,6 +16,7 @@ export class GracefulShutdownInterceptor implements NestInterceptor {
     // Reject new requests during shutdown
     if (this.gracefulShutdown.isShutdown()) {
       const response = context.switchToHttp().getResponse();
+      response.setHeader?.('Connection', 'close');
       response.status(503).json({
         statusCode: 503,
         message: 'Service is shutting down',

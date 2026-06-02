@@ -13,6 +13,8 @@ import {
 } from '../savings/entities/user-subscription.entity';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bullmq';
+import { MailService } from '../mail/mail.service';
+import { ShutdownTrackedTask } from '../../common/decorators/shutdown-task.decorator';
 import {
   BroadcastNotificationDto,
   ScheduleNotificationDto,
@@ -330,6 +332,7 @@ export class AdminNotificationsService {
    * Scheduled job to process scheduled notifications
    * Runs every minute to check for pending scheduled notifications
    */
+  @ShutdownTrackedTask()
   @Cron(CronExpression.EVERY_MINUTE)
   async processScheduledNotifications(): Promise<void> {
     const now = new Date();

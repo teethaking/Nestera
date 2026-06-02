@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 interface SecretMetadata {
@@ -9,17 +9,25 @@ interface SecretMetadata {
 }
 
 @Injectable()
-export class SecretsManagerService implements OnModuleInit {
+export class SecretsManagerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SecretsManagerService.name);
   private readonly secretsCache: Map<string, string> = new Map();
   private readonly secretsMetadata: Map<string, SecretMetadata> = new Map();
   private readonly SECRET_EXPIRY_DAYS = 90;
+  private expirationMonitor: NodeJS.Timeout | null = null;
 
   constructor(private configService: ConfigService) {}
 
   onModuleInit() {
     this.initializeSecrets();
     this.startExpirationMonitor();
+  }
+
+  onModuleDestroy() {
+    if (this.expirationMonitor) {
+      clearInterval(this.expirationMonitor);
+      this.expirationMonitor = null;
+    }
   }
 
   private initializeSecrets() {
@@ -86,7 +94,7 @@ export class SecretsManagerService implements OnModuleInit {
   }
 
   private startExpirationMonitor() {
-    setInterval(() => {
+    this.expirationMonitor = setInterval(() => {
       const expiring = this.getExpiringSecrets(30);
       if (expiring.length > 0) {
         this.logger.warn(`Found ${expiring.length} expiring secrets: ${expiring.map(s => s.key).join(', ')}`);

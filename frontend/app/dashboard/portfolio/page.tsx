@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
-import { Briefcase, TrendingUp, Download, MoreHorizontal } from "lucide-react";
-import { Button } from "@/app/components/ui/Button";
+import React from "react";
+import { Briefcase, TrendingUp, Download, FileJson, FileText, MoreHorizontal } from "lucide-react";
+import { useExport } from "@/app/hooks/useExport";
+import { useToast } from "@/app/context/ToastContext";
 
 const ASSETS = [
   { name: "USDC Flexible", type: "Savings", balance: 2400, value: 2400, apy: 6.5, pnl: 156, pnlPct: 6.9 },
@@ -29,35 +30,25 @@ const TYPE_COLORS: Record<string, string> = {
   Group: "text-amber-400 bg-amber-400/10",
 };
 
+const exportRows = ASSETS.map(({ name, type, balance, value, apy, pnl, pnlPct }) => ({
+  name, type, balance, "value_usd": value, "apy_pct": apy, "pnl_usd": pnl, "pnl_pct": pnlPct,
+}));
+
 export default function PortfolioPage() {
-  const [exporting, setExporting] = useState(false);
+  const toast = useToast();
+  const { exportData, loading } = useExport({
+    onSuccess: (fmt, name) => toast.success("Export complete", `${name} downloaded`),
+    onError: () => toast.error("Export failed", "Please try again"),
+  });
 
   const totalValue = ASSETS.reduce((s, a) => s + a.value, 0);
   const totalPnl = ASSETS.reduce((s, a) => s + a.pnl, 0);
   const totalPnlPct = ((totalPnl / (totalValue - totalPnl)) * 100).toFixed(2);
 
-  const handleExport = () => {
-    setExporting(true);
-    const csv = [
-      "Name,Type,Balance,Value (USD),APY (%),P&L (USD),P&L (%)",
-      ...ASSETS.map((a) =>
-        `${a.name},${a.type},${a.balance},${a.value},${a.apy},${a.pnl},${a.pnlPct}`
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "nestera-portfolio.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-    setTimeout(() => setExporting(false), 1000);
-  };
-
   return (
     <div className="w-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-b from-[#063d3d] to-[#0a6f6f] flex items-center justify-center text-[#5de0e0]">
             <Briefcase size={20} />
@@ -67,16 +58,30 @@ export default function PortfolioPage() {
             <p className="text-[#5e8c96] text-sm m-0">All assets and positions</p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="md"
-          leftIcon={<Download size={15} />}
-          onClick={handleExport}
-          loading={exporting}
-          className="border-cyan-500/20 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20"
-        >
-          {exporting ? "Exporting…" : "Export CSV"}
-        </Button>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => exportData(exportRows, { format: "csv", filename: "nestera-portfolio" })}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-3 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-[#061a1a] font-bold rounded-xl transition-all active:scale-95 text-sm"
+          >
+            <Download size={14} /> CSV
+          </button>
+          <button
+            onClick={() => exportData(exportRows, { format: "json", filename: "nestera-portfolio" })}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-3 py-2 bg-cyan-500/10 hover:bg-cyan-500/20 disabled:opacity-50 border border-cyan-500/30 text-cyan-300 font-semibold rounded-xl transition-all active:scale-95 text-sm"
+          >
+            <FileJson size={14} /> JSON
+          </button>
+          <button
+            onClick={() => exportData(exportRows, { format: "pdf", filename: "nestera-tax-report", pdfTitle: "Nestera Tax Report" })}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-50 border border-emerald-500/30 text-emerald-300 font-semibold rounded-xl transition-all active:scale-95 text-sm"
+          >
+            <FileText size={14} /> Tax PDF
+          </button>
+        </div>
       </div>
 
       {/* Summary cards */}
@@ -99,9 +104,9 @@ export default function PortfolioPage() {
       <div className="rounded-2xl border border-[rgba(8,120,120,0.12)] bg-gradient-to-b from-[rgba(6,18,20,0.55)] to-[rgba(4,12,14,0.45)] p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-white m-0">Performance</h2>
-          <Button variant="ghost" size="sm" aria-label="Options">
+          <button type="button" className="text-[#7caeb6] hover:text-cyan-300 transition-colors" aria-label="Options">
             <MoreHorizontal size={18} />
-          </Button>
+          </button>
         </div>
         <div className="flex items-end gap-2 h-28">
           {PERFORMANCE.map((p) => (

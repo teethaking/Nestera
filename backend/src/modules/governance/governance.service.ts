@@ -550,6 +550,11 @@ export class GovernanceService {
       governanceTokenContractId,
       user.publicKey,
     );
+    const votingPower = (balance / 10_000_000).toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+    return { votingPower: `${votingPower} NST` };
 
     return Number(balance) / 10_000_000;
   }

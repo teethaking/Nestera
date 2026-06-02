@@ -1,13 +1,21 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { Landmark, Search, ChevronDown, LayoutGrid, List } from "lucide-react";
+import { Landmark, Search, ChevronDown, LayoutGrid, List, Download, FileJson } from "lucide-react";
 import SavingsPoolCard, {
   type SavingsPool,
 } from "@/app/components/dashboard/SavingsPoolCard";
+import { useExport } from "@/app/hooks/useExport";
+import { useToast } from "@/app/context/ToastContext";
 
 export default function GoalBasedSavingsPage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const toast = useToast();
+  const { exportData, loading } = useExport({
+    onSuccess: (fmt, name) => toast.success("Export complete", `${name} downloaded`),
+    onError: () => toast.error("Export failed", "Please try again"),
+  });
+
   // Savings pools data
   const savingsPools: SavingsPool[] = [
     {
@@ -111,7 +119,7 @@ export default function GoalBasedSavingsPage() {
         </div>
 
         {/* View Toggles & Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="flex bg-[#0e2330] p-1 rounded-xl border border-white/5">
             <button className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shadow-sm">
               <LayoutGrid size={18} />
@@ -120,6 +128,28 @@ export default function GoalBasedSavingsPage() {
               <List size={18} />
             </button>
           </div>
+          <button
+            onClick={() => exportData(
+              savingsPools.map(({ id, name, strategy, apy, tvl, riskLevel }) => ({ id, name, strategy, apy, tvl, riskLevel })),
+              { format: "csv", filename: "nestera-savings-pools" }
+            )}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-cyan-500/10 hover:bg-cyan-500/20 disabled:opacity-50 border border-cyan-500/30 text-cyan-300 font-semibold rounded-xl transition-all active:scale-95 text-sm"
+          >
+            <Download size={15} />
+            CSV
+          </button>
+          <button
+            onClick={() => exportData(
+              savingsPools.map(({ id, name, strategy, apy, tvl, riskLevel }) => ({ id, name, strategy, apy, tvl, riskLevel })),
+              { format: "json", filename: "nestera-savings-pools" }
+            )}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-cyan-500/10 hover:bg-cyan-500/20 disabled:opacity-50 border border-cyan-500/30 text-cyan-300 font-semibold rounded-xl transition-all active:scale-95 text-sm"
+          >
+            <FileJson size={15} />
+            JSON
+          </button>
           <button className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-[#061a1a] font-bold rounded-xl transition-all shadow-lg active:scale-95">
             Create New Goal
           </button>

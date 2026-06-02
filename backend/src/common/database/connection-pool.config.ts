@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 
@@ -12,10 +12,11 @@ export interface PoolMetrics {
 }
 
 @Injectable()
-export class ConnectionPoolService {
+export class ConnectionPoolService implements OnModuleDestroy {
   private readonly logger = new Logger(ConnectionPoolService.name);
   private metrics: PoolMetrics[] = [];
   private readonly maxMetricsHistory = 1000;
+  private monitorInterval: NodeJS.Timeout | null = null;
 
   constructor(
     private configService: ConfigService,
@@ -25,9 +26,16 @@ export class ConnectionPoolService {
   }
 
   private initializePoolMonitoring() {
-    setInterval(() => {
+    this.monitorInterval = setInterval(() => {
       this.collectMetrics();
     }, 30000); // Collect every 30 seconds
+  }
+
+  onModuleDestroy(): void {
+    if (this.monitorInterval) {
+      clearInterval(this.monitorInterval);
+      this.monitorInterval = null;
+    }
   }
 
   private collectMetrics() {

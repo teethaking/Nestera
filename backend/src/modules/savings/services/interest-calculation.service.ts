@@ -10,6 +10,7 @@ import {
 } from '../entities/user-subscription.entity';
 import { InterestHistory } from '../entities/interest-history.entity';
 import { SavingsProductType } from '../entities/savings-product.entity';
+import { ShutdownTrackedTask } from '../../../common/decorators/shutdown-task.decorator';
 
 export interface InterestCreditedEvent {
   userId: string;
@@ -37,6 +38,7 @@ export class InterestCalculationService {
    * Runs daily at midnight UTC.
    * Calculates and distributes daily accrued interest for all active subscriptions.
    */
+  @ShutdownTrackedTask()
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: 'UTC' })
   async runDailyInterestCalculation(): Promise<void> {
     const runId = uuidv4();

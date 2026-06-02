@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { ShutdownTrackedTask } from '../decorators/shutdown-task.decorator';
 import { IdempotencyService } from './idempotency.service';
 
 @Injectable()
@@ -8,6 +9,7 @@ export class IdempotencyCleanupService {
 
   constructor(private readonly idempotencyService: IdempotencyService) {}
 
+  @ShutdownTrackedTask()
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   handleCleanup() {
     this.logger.log('Idempotency cleanup job running...');

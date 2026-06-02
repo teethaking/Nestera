@@ -14,6 +14,7 @@ import {
 } from '../entities/auto-deposit-schedule.entity';
 import { CreateAutoDepositDto } from '../dto/auto-deposit.dto';
 import { SavingsService } from '../savings.service';
+import { ShutdownTrackedTask } from '../../../common/decorators/shutdown-task.decorator';
 
 const MAX_RETRIES = 5;
 
@@ -63,6 +64,7 @@ export class AutoDepositService {
   }
 
   /** Runs every minute; processes due schedules */
+  @ShutdownTrackedTask()
   @Cron(CronExpression.EVERY_MINUTE)
   async processDueSchedules(): Promise<void> {
     const now = new Date();

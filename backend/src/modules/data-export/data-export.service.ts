@@ -116,6 +116,20 @@ export class DataExportService {
   }
 
   /**
+   * List all export requests for a user (history/log).
+   */
+  async getExportHistory(userId: string) {
+    const requests = await this.exportRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+    return requests.map(({ id, status, createdAt, completedAt, expiresAt }) => ({
+      requestId: id, status, createdAt, completedAt, expiresAt,
+    }));
+  }
+
+  /**
    * Async: build ZIP, update record, email user.
    */
   private async processExport(requestId: string, user: User): Promise<void> {
@@ -169,6 +183,81 @@ export class DataExportService {
       });
       throw err;
     }
+  }
+
+  /**
+   * Typed export: transactions for a user, with optional date range.
+   */
+  async exportTransactions(
+    userId: string,
+    from?: string,
+    to?: string,
+  ): Promise<Record<string, unknown>[]> {
+    let qb = this.transactionRepository
+      .createQueryBuilder('tx')
+      .where('tx.userId = :userId', { userId });
+    if (from) qb = qb.andWhere('tx.createdAt >= :from', { from });
+    if (to) qb = qb.andWhere('tx.createdAt <= :to', { to });
+    const rows = await qb.getMany();
+    return rows.map(({ id, type, amount, currency, status, createdAt }) => ({
+      id, type, amount, currency, status,
+      date: createdAt?.toISOString().slice(0, 10) ?? '',
+    }));
+  }
+
+  /**
+   * Typed export: savings goals for a user.
+   */
+  async exportGoals(userId: string): Promise<Record<string, unknown>[]> {
+    const goals = await this.savingsGoalRepository.find({
+      where: { userId },
+    });
+    return goals.map(({ id, name, targetAmount, currentAmount, currency, status, createdAt }) => ({
+      id, name, targetAmount, currentAmount, currency, status,
+      createdAt: createdAt?.toISOString().slice(0, 10) ?? '',
+    }));
+  }
+
+  /**
+   * Typed export: portfolio summary (aggregated from transactions + goals).
+   */
+  async exportPortfolio(userId: string): Promise<Record<string, unknown>[]> {
+    const [transactions, goals] = await Promise.all([
+      this.transactionRepository.find({ where: { userId } }),
+      this.savingsGoalRepository.find({ where: { userId } }),
+    ]);
+    const totalDeposited = transactions
+      .filter((t) => (t as Record<string, unknown>)['type'] === 'deposit')
+      .reduce((s, t) => s + Number((t as Record<string, unknown>)['amount'] ?? 0), 0);
+    const totalWithdrawn = transactions
+      .filter((t) => (t as Record<string, unknown>)['type'] === 'withdraw')
+      .reduce((s, t) => s + Number((t as Record<string, unknown>)['amount'] ?? 0), 0);
+    return [
+      { metric: 'total_deposited', value: totalDeposited },
+      { metric: 'total_withdrawn', value: totalWithdrawn },
+      { metric: 'net_position', value: totalDeposited - totalWithdrawn },
+      { metric: 'active_goals', value: goals.filter((g) => (g as Record<string, unknown>)['status'] === 'active').length },
+      { metric: 'completed_goals', value: goals.filter((g) => (g as Record<string, unknown>)['status'] === 'completed').length },
+    ];
+  }
+
+  /**
+   * Typed export: analytics data (transaction counts by type + date).
+   */
+  async exportAnalytics(
+    userId: string,
+    from?: string,
+    to?: string,
+  ): Promise<Record<string, unknown>[]> {
+    let qb = this.transactionRepository
+      .createQueryBuilder('tx')
+      .select(['tx.type AS type', 'DATE(tx.createdAt) AS date', 'COUNT(*) AS count', 'SUM(tx.amount) AS total'])
+      .where('tx.userId = :userId', { userId })
+      .groupBy('tx.type, DATE(tx.createdAt)')
+      .orderBy('DATE(tx.createdAt)', 'ASC');
+    if (from) qb = qb.andWhere('tx.createdAt >= :from', { from });
+    if (to) qb = qb.andWhere('tx.createdAt <= :to', { to });
+    return qb.getRawMany();
   }
 
   private buildZip(

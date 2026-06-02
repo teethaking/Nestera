@@ -204,6 +204,7 @@ const envValidationSchema = Joi.object({
         },
       }),
     }),
+    ConfigModule.forRoot({
       isGlobal: true,
       load: [configuration],
       validationSchema: envValidationSchema,
@@ -229,6 +230,31 @@ const envValidationSchema = Joi.object({
 
         return value;
       },
+    }),
+    LoggerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const isProduction =
+          configService.get<string>('NODE_ENV') === 'production';
+        return {
+          pinoHttp: {
+            transport: isProduction
+              ? undefined
+              : { target: 'pino-pretty', options: { singleLine: true } },
+            level: isProduction ? 'info' : 'debug',
+          },
+        };
+      },
+    }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        redis: {
+          uri: config.get<string>('REDIS_URL') || 'redis://localhost:6379',
+        },
+      }),
     }),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
@@ -267,7 +293,6 @@ const envValidationSchema = Joi.object({
         };
       },
     }),
-    ScheduleModule.forRoot(),
     AuthModule,
     CacheModule,
     HealthModule,
@@ -300,6 +325,7 @@ const envValidationSchema = Joi.object({
     PerformanceModule,
     ApmModule,
     FeatureFlagsModule,
+    JobsModule,
     CommonModule,
     ThrottlerModule.forRoot([
       {
