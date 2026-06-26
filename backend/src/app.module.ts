@@ -57,6 +57,8 @@ import { SandboxModule } from './modules/sandbox/sandbox.module';
 import { FeedbackModule } from './modules/feedback/feedback.module';
 import { StatisticsModule } from './modules/statistics/statistics.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
+import { StatisticsModule } from './modules/statistics/statistics.module';
+import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 
 const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').required(),
