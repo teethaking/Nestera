@@ -1,5 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsUUID,
+  Min,
+  IsArray,
+  ArrayMinSize,
+  ValidateNested,
+  IsIn,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import {
   GoalTransferFrequency,
   GoalTransferStatus,
@@ -25,6 +36,32 @@ export class CreateGoalTransferScheduleDto {
   @ApiProperty({ enum: GoalTransferFrequency })
   @IsEnum(GoalTransferFrequency)
   frequency: GoalTransferFrequency;
+}
+
+export class BatchCreateGoalTransferScheduleDto {
+  @ApiProperty({
+    type: [CreateGoalTransferScheduleDto],
+    description: 'Array of transfer schedules to create',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateGoalTransferScheduleDto)
+  schedules: CreateGoalTransferScheduleDto[];
+}
+
+export class UpdateGoalTransferScheduleDto {
+  @ApiPropertyOptional({ example: 100, minimum: 0.01 })
+  @IsOptional()
+  @IsNumber()
+  @IsPositiveAmount()
+  @Min(0.01)
+  amount?: number;
+
+  @ApiPropertyOptional({ enum: GoalTransferFrequency })
+  @IsOptional()
+  @IsEnum(GoalTransferFrequency)
+  frequency?: GoalTransferFrequency;
 }
 
 export class GoalTransferScheduleResponseDto {

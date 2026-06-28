@@ -252,8 +252,152 @@ export class GoalTransferService {
     return schedule;
   }
 
+  async updateSchedule(
+    id: string,
+    userId: string,
+    updates: { amount?: number; frequency?: GoalTransferFrequency },
+  ): Promise<GoalTransferSchedule> {
+    const schedule = await this.findOwned(id, userId);
+    if (schedule.status === GoalTransferStatus.CANCELLED) {
+      throw new BadRequestException('Cannot update a cancelled schedule');
+    }
+
+    if (updates.amount !== undefined) {
+      if (updates.amount < MIN_TRANSFER_AMOUNT) {
+        throw new BadRequestException(
+          `Minimum transfer amount is ${MIN_TRANSFER_AMOUNT}`,
+        );
+      }
+      schedule.amount = updates.amount;
+    }
+
+    if (updates.frequency !== undefined) {
+      schedule.frequency = updates.frequency;
+      schedule.nextRunAt = this.computeNextRun(schedule.frequency);
+    }
+
+    return this.scheduleRepo.save(schedule);
+  }
+
+  async getUpcomingTransfers(
+    userId: string,
+    limit: number = 10,
+  ): Promise<
+    Array<{
+      scheduleId: string;
+      goalId: string;
+      goalName: string;
+      amount: number;
+      frequency: GoalTransferFrequency;
+      nextRunAt: Date;
+      estimatedTransfers: number;
+    }>
+  > {
+    const schedules = await this.scheduleRepo.find({
+      where: { userId, status: GoalTransferStatus.ACTIVE },
+      relations: ['goal'],
+      order: { nextRunAt: 'ASC' },
+      take: limit,
+    });
+
+    return schedules.map((s) => {
+      const nextRun = new Date(s.nextRunAt);
+      let estimatedTransfers = 0;
+      const oneYearFromNow = new Date();
+      oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+
+      let cursor = new Date(nextRun);
+      while (cursor <= oneYearFromNow) {
+        estimatedTransfers++;
+        cursor = this.computeNextRun(s.frequency, cursor);
+      }
+
+      return {
+        scheduleId: s.id,
+        goalId: s.goalId,
+        goalName: s.goal?.goalName ?? 'Unknown Goal',
+        amount: Number(s.amount),
+        frequency: s.frequency,
+        nextRunAt: s.nextRunAt,
+        estimatedTransfers,
+      };
+    });
+  }
+
+  async batchCreate(
+    userId: string,
+    schedules: Array<{
+      goalId: string;
+      amount: number;
+      frequency: GoalTransferFrequency;
+      productId?: string;
+    }>,
+  ): Promise<GoalTransferSchedule[]> {
+    const created: GoalTransferSchedule[] = [];
+    for (const s of schedules) {
+      const schedule = await this.create(userId, {
+        goalId: s.goalId,
+        amount: s.amount,
+        frequency: s.frequency,
+        productId: s.productId,
+      });
+      created.push(schedule);
+    }
+    return created;
+  }
+
+  async getNextScheduledTransfer(
+    userId: string,
+  ): Promise<GoalTransferSchedule | null> {
+    const schedule = await this.scheduleRepo.findOne({
+      where: { userId, status: GoalTransferStatus.ACTIVE },
+      order: { nextRunAt: 'ASC' },
+    });
+    return schedule ?? null;
+  }
+
+  async getTransferSummary(userId: string): Promise<{
+    activeSchedules: number;
+    pausedSchedules: number;
+    totalMonthlyContribution: number;
+    nextTransferDate: Date | null;
+  }> {
+    const all = await this.scheduleRepo.find({ where: { userId } });
+
+    const active = all.filter((s) => s.status === GoalTransferStatus.ACTIVE);
+    const paused = all.filter((s) => s.status === GoalTransferStatus.PAUSED);
+
+    const monthlyTotal = active.reduce((sum, s) => {
+      const amount = Number(s.amount);
+      switch (s.frequency) {
+        case GoalTransferFrequency.DAILY:
+          return sum + amount * 30;
+        case GoalTransferFrequency.WEEKLY:
+          return sum + amount * 4;
+        case GoalTransferFrequency.BI_WEEKLY:
+          return sum + amount * 2;
+        case GoalTransferFrequency.MONTHLY:
+          return sum + amount;
+        default:
+          return sum;
+      }
+    }, 0);
+
+    const next = active.sort(
+      (a, b) => a.nextRunAt.getTime() - b.nextRunAt.getTime(),
+    )[0];
+
+    return {
+      activeSchedules: active.length,
+      pausedSchedules: paused.length,
+      totalMonthlyContribution: Math.round(monthlyTotal * 100) / 100,
+      nextTransferDate: next?.nextRunAt ?? null,
+    };
+  }
+
   computeNextRun(frequency: GoalTransferFrequency, from = new Date()): Date {
     const next = new Date(from);
+    next.setSeconds(0, 0);
     switch (frequency) {
       case GoalTransferFrequency.DAILY:
         next.setDate(next.getDate() + 1);
