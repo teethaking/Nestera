@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import compression from 'compression';
 import helmet from 'helmet';
+import { json, urlencoded } from 'body-parser';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
@@ -74,11 +75,43 @@ async function bootstrap() {
     process.exit(1);
   }
 
+  // API Response Compression with brotli support and binary payload exclusion
+  const compressionThreshold = parseInt(
+    process.env.COMPRESSION_THRESHOLD || '1024',
+    10,
+  );
   app.use(
     compression({
-      threshold: 1024,
+      threshold: compressionThreshold,
+      brotli: {
+        enabled: true,
+        zlib: {},
+        params: {
+          [require('zlib').constants.BROTLI_PARAM_QUALITY]: 4,
+        },
+      },
+      filter: (req, res) => {
+        const contentType = res.getHeader('Content-Type') as string;
+        // Don't compress binary payloads
+        if (
+          contentType?.includes('application/pdf') ||
+          contentType?.includes('image/') ||
+          contentType?.includes('video/') ||
+          contentType?.includes('audio/') ||
+          contentType?.includes('application/octet-stream')
+        ) {
+          return false;
+        }
+        return compression.filter(req, res);
+      },
     }),
   );
+
+  // Request body size limits
+  const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
+  const urlencodedLimit = process.env.URLENCODED_BODY_LIMIT || '1mb';
+  app.use(json({ limit: jsonBodyLimit }));
+  app.use(urlencoded({ limit: urlencodedLimit, extended: true }));
 
   app.use(
     helmet({

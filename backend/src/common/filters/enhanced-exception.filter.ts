@@ -11,6 +11,7 @@ import {
   NotFoundException,
   ConflictException,
   InternalServerErrorException,
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -154,6 +155,9 @@ export class EnhancedExceptionFilter implements ExceptionFilter {
     }
     if (exception instanceof BadRequestException) {
       return 'SYS_400';
+    }
+    if (exception instanceof PayloadTooLargeException) {
+      return 'SYS_413';
     }
 
     // Default based on status code

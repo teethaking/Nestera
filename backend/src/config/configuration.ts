@@ -299,4 +299,9 @@ export default () => ({
       10,
     ),
   },
+  compression: {
+    threshold: parseInt(process.env.COMPRESSION_THRESHOLD || '1024', 10),
+    jsonBodyLimit: process.env.JSON_BODY_LIMIT || '1mb',
+    urlencodedBodyLimit: process.env.URLENCODED_BODY_LIMIT || '1mb',
+  },
 });

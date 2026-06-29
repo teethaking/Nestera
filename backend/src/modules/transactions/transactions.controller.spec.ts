@@ -101,7 +101,7 @@ describe('TransactionsController', () => {
         queryDto,
       );
       expect(result).toEqual(mockPageDto);
-      expect(result.data).toHaveLength(1);
+      expect(result.items).toHaveLength(1);
       expect(result.meta.totalItemCount).toBe(1);
     });
 

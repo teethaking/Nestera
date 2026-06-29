@@ -43,6 +43,7 @@ const STATUS_TO_ERROR_CODE: Record<number, ErrorCode> = {
   [HttpStatus.CONFLICT]: ErrorCode.CONFLICT,
   [HttpStatus.TOO_MANY_REQUESTS]: ErrorCode.TOO_MANY_REQUESTS,
   [HttpStatus.SERVICE_UNAVAILABLE]: ErrorCode.SERVICE_UNAVAILABLE,
+  [HttpStatus.REQUEST_ENTITY_TOO_LARGE]: ErrorCode.PAYLOAD_TOO_LARGE,
 };
 
 function isRpcFallbackError(exception: unknown): exception is Error {
