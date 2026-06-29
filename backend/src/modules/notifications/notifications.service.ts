@@ -21,6 +21,7 @@ import {
   decodeCursor,
   encodeCursor,
 } from '../../common/helpers/cursor-pagination.helper';
+import { NotificationIdempotencyService } from './notification-idempotency.service';
 
 export interface SweepCompletedEvent {
   userId: string;
@@ -88,6 +89,7 @@ export class NotificationsService {
     private readonly waitlistEventRepository: Repository<WaitlistEvent>,
     private readonly mailService: MailService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly idempotencyService: NotificationIdempotencyService,
   ) {}
 
   /**
@@ -942,17 +944,40 @@ export class NotificationsService {
     title: string;
     message: string;
     metadata?: Record<string, any>;
+    eventId?: string;
   }) {
+    const eventId = data.eventId || `${data.type}-${Date.now()}`;
+    
+    // Check idempotency to prevent duplicate dispatches
+    const existingRecord = await this.idempotencyService.checkAndLock(
+      data.userId,
+      data.type,
+      eventId,
+    );
+
+    if (existingRecord && existingRecord.dispatched) {
+      this.logger.debug(
+        `Skipping duplicate notification dispatch: ${data.type} for user ${data.userId}, event ${eventId}`,
+      );
+      return;
+    }
+
     const preferences = await this.getOrCreatePreferences(data.userId);
     const user = await this.userRepository.findOne({
       where: { id: data.userId },
     });
 
-    if (!user) return;
+    if (!user) {
+      await this.idempotencyService.markAsDispatched(data.userId, data.type, eventId);
+      return;
+    }
+
+    let notificationId: string | undefined;
 
     // 1. Always create In-App notification if enabled
     if (preferences.inAppNotifications) {
-      await this.createNotification(data);
+      const notification = await this.createNotification(data);
+      notificationId = notification.id;
     }
 
     // 2. Handle Email based on Digest Frequency
@@ -978,6 +1003,14 @@ export class NotificationsService {
         );
       }
     }
+
+    // Mark as dispatched
+    await this.idempotencyService.markAsDispatched(
+      data.userId,
+      data.type,
+      eventId,
+      notificationId,
+    );
   }
 
   /**

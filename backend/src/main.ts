@@ -20,6 +20,7 @@ import {
 import { VersionAnalyticsInterceptor } from './common/versioning/version-analytics.interceptor';
 import { VersionAnalyticsService } from './common/versioning/version-analytics.service';
 import { GracefulShutdownService } from './common/services/graceful-shutdown.service';
+import { ContractCompatibilityService } from './common/services/contract-compatibility.service';
 import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
 
 type AppCorsConfig = {
@@ -60,6 +61,18 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('port');
   const corsConfig = configService.get<AppCorsConfig>('cors');
+
+  // Perform contract-backend compatibility check on startup
+  try {
+    const contractCompatibility = app.get(ContractCompatibilityService);
+    await contractCompatibility.performStartupCheck();
+  } catch (error) {
+    console.error(
+      '[Bootstrap] Contract compatibility check failed. Application will exit.',
+      error,
+    );
+    process.exit(1);
+  }
 
   app.use(
     compression({

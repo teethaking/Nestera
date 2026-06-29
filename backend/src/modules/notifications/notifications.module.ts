@@ -7,6 +7,7 @@ import { NotificationsGateway } from './notifications.gateway';
 import { Notification } from './entities/notification.entity';
 import { UserPreference } from './entities/notification-preference.entity';
 import { PendingNotification } from './entities/pending-notification.entity';
+import { NotificationIdempotency } from './entities/notification-idempotency.entity';
 import { WaitlistEntry } from '../savings/entities/waitlist-entry.entity';
 import { WaitlistEvent } from '../savings/entities/waitlist-event.entity';
 import { Delegation } from '../governance/entities/delegation.entity';
@@ -17,6 +18,7 @@ import { BlockchainModule } from '../blockchain/blockchain.module';
 import { User } from '../user/entities/user.entity';
 import { MilestoneSchedulerService } from './milestone-scheduler.service';
 import { GovernanceNotificationScheduler } from './governance-notification.scheduler';
+import { NotificationIdempotencyService } from './notification-idempotency.service';
 import { SavingsModule } from '../savings/savings.module';
 import { AuthModule } from '../../auth/auth.module';
 
@@ -26,6 +28,7 @@ import { AuthModule } from '../../auth/auth.module';
       Notification,
       UserPreference,
       PendingNotification,
+      NotificationIdempotency,
       User,
       WaitlistEntry,
       WaitlistEvent,
@@ -41,10 +44,11 @@ import { AuthModule } from '../../auth/auth.module';
   controllers: [NotificationsController, UserNotificationsController],
   providers: [
     NotificationsService,
+    NotificationIdempotencyService,
     NotificationsGateway,
     MilestoneSchedulerService,
     GovernanceNotificationScheduler,
   ],
-  exports: [NotificationsService],
+  exports: [NotificationsService, NotificationIdempotencyService],
 })
 export class NotificationsModule {}

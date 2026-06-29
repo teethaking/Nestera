@@ -40,7 +40,7 @@ interface CacheMetrics {
     set: LatencyBucket;
     del: LatencyBucket;
   };
-  keyMetrics: Map<string, { hits: number; misses: number; sets: number }>;
+  keyMetrics: Map<string, { hits: number; misses: number; sets: number; updateFrequency: number; lastUpdatedAt: Date }>;
 }
 
 const MAX_LATENCY_SAMPLES = 500;
@@ -49,6 +49,13 @@ const MAX_LATENCY_SAMPLES = 500;
 // they survive process restarts and are shared across multiple instances.
 const TAG_PREFIX = '__tags:';
 const TAG_TTL = CacheTTL.STATIC; // 24h
+
+interface AdaptiveTTLConfig {
+  minTTL: number;
+  maxTTL: number;
+  volatilityThreshold: number; // updates per minute
+  sampleWindow: number; // minutes
+}
 
 @Injectable()
 export class CacheStrategyService {
@@ -62,6 +69,15 @@ export class CacheStrategyService {
     ['analytics',  CacheTTL.LONG],
     ['blockchain', CacheTTL.VOLATILE],
   ]);
+
+  private readonly adaptiveConfig: AdaptiveTTLConfig = {
+    minTTL: CacheTTL.SHORT,
+    maxTTL: CacheTTL.LONG,
+    volatilityThreshold: 5, // 5 updates per minute
+    sampleWindow: 10, // 10 minutes
+  };
+
+  private readonly keyUpdateHistory = new Map<string, number[]>(); // timestamps of updates
 
   /**
    * In-memory mirror of tag→key sets.
@@ -108,11 +124,12 @@ export class CacheStrategyService {
   ): Promise<void> {
     const t0 = Date.now();
     try {
-      const finalTTL = ttl ?? this.getDefaultTTL(key);
+      const finalTTL = ttl ?? this.calculateAdaptiveTTL(key);
       await this.cacheManager.set(key, value, finalTTL);
       this.recordLatency('set', Date.now() - t0);
       this.metrics.sets++;
       this.updateKeyMetrics(key, 'sets');
+      this.recordKeyUpdate(key);
 
       if (tags?.length) {
         await this.trackKeyInTags(key, tags);
@@ -333,9 +350,77 @@ export class CacheStrategyService {
 
   private updateKeyMetrics(key: string, type: 'hits' | 'misses' | 'sets'): void {
     if (!this.metrics.keyMetrics.has(key)) {
-      this.metrics.keyMetrics.set(key, { hits: 0, misses: 0, sets: 0 });
+      this.metrics.keyMetrics.set(key, { 
+        hits: 0, 
+        misses: 0, 
+        sets: 0, 
+        updateFrequency: 0, 
+        lastUpdatedAt: new Date() 
+      });
     }
     this.metrics.keyMetrics.get(key)![type]++;
+  }
+
+  private recordKeyUpdate(key: string): void {
+    const now = Date.now();
+    if (!this.keyUpdateHistory.has(key)) {
+      this.keyUpdateHistory.set(key, []);
+    }
+    
+    const history = this.keyUpdateHistory.get(key)!;
+    history.push(now);
+    
+    // Keep only updates within the sample window
+    const cutoff = now - (this.adaptiveConfig.sampleWindow * 60 * 1000);
+    const recentUpdates = history.filter(timestamp => timestamp > cutoff);
+    this.keyUpdateHistory.set(key, recentUpdates);
+    
+    // Update metrics
+    if (this.metrics.keyMetrics.has(key)) {
+      const metrics = this.metrics.keyMetrics.get(key)!;
+      metrics.updateFrequency = recentUpdates.length;
+      metrics.lastUpdatedAt = new Date(now);
+    }
+  }
+
+  private calculateAdaptiveTTL(key: string): number {
+    const baseTTL = this.getDefaultTTL(key);
+    const updateHistory = this.keyUpdateHistory.get(key);
+    
+    if (!updateHistory || updateHistory.length === 0) {
+      return baseTTL;
+    }
+    
+    // Calculate update frequency (updates per minute)
+    const now = Date.now();
+    const cutoff = now - (this.adaptiveConfig.sampleWindow * 60 * 1000);
+    const recentUpdates = updateHistory.filter(timestamp => timestamp > cutoff);
+    const updatesPerMinute = recentUpdates.length / this.adaptiveConfig.sampleWindow;
+    
+    // Adaptive TTL: higher volatility = lower TTL
+    if (updatesPerMinute > this.adaptiveConfig.volatilityThreshold) {
+      // High volatility - use shorter TTL
+      const ratio = Math.min(updatesPerMinute / this.adaptiveConfig.volatilityThreshold, 2);
+      const adaptiveTTL = Math.max(
+        this.adaptiveConfig.minTTL,
+        baseTTL / ratio
+      );
+      this.logger.debug(
+        `Adaptive TTL for ${key}: ${adaptiveTTL}ms (base: ${baseTTL}ms, updates/min: ${updatesPerMinute.toFixed(2)})`
+      );
+      return adaptiveTTL;
+    } else {
+      // Low volatility - can use longer TTL
+      const ratio = Math.max(updatesPerMinute / this.adaptiveConfig.volatilityThreshold, 0.5);
+      const adaptiveTTL = Math.min(
+        this.adaptiveConfig.maxTTL,
+        baseTTL / ratio
+      );
+      this.logger.debug(
+        `Adaptive TTL for ${key}: ${adaptiveTTL}ms (base: ${baseTTL}ms, updates/min: ${updatesPerMinute.toFixed(2)})`
+      );
+      return adaptiveTTL;
+    }
   }
 
   private recordLatency(op: 'get' | 'set' | 'del', ms: number): void {
@@ -399,6 +484,40 @@ export class CacheStrategyService {
         del: { sum: 0, count: 0, samples: [] },
       },
       keyMetrics: new Map(),
+    };
+  }
+
+  /**
+   * Get adaptive TTL statistics for monitoring
+   */
+  getAdaptiveTTLStats(): {
+    totalKeys: number;
+    keysWithAdaptiveTTL: number;
+    averageUpdateFrequency: number;
+    config: AdaptiveTTLConfig;
+  } {
+    const totalKeys = this.keyUpdateHistory.size;
+    const keysWithAdaptiveTTL = Array.from(this.keyUpdateHistory.values()).filter(
+      history => history.length > 0
+    ).length;
+    
+    let totalFrequency = 0;
+    let count = 0;
+    
+    for (const metrics of this.metrics.keyMetrics.values()) {
+      if (metrics.updateFrequency > 0) {
+        totalFrequency += metrics.updateFrequency;
+        count++;
+      }
+    }
+    
+    const averageUpdateFrequency = count > 0 ? totalFrequency / count : 0;
+    
+    return {
+      totalKeys,
+      keysWithAdaptiveTTL,
+      averageUpdateFrequency,
+      config: this.adaptiveConfig,
     };
   }
 }
