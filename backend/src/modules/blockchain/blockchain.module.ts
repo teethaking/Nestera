@@ -26,11 +26,13 @@ import { IndexerCheckpointService } from './indexer-checkpoint.service';
 import { BlockchainReplayService } from './blockchain-replay.service';
 import { BalanceSyncService } from './balance-sync.service';
 import { ProtocolMetrics } from '../admin-analytics/entities/protocol-metrics.entity';
+import { TransactionsModule } from '../transactions/transactions.module';
 
 @Global()
 @Module({
   imports: [
     HttpModule,
+    TransactionsModule,
     CacheModule.register({
       ttl: 300,
       max: 100,

@@ -411,6 +411,27 @@ export class StatisticsController {
     );
   }
 
+  @Delete('export/jobs/:jobId')
+  @Roles(Role.ADMIN)
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ export: { limit: 6, ttl: 15 * 60 * 1000 } })
+  @ApiOperation({ summary: 'Cancel an analytics export job' })
+  @ApiParam({ name: 'jobId', description: 'Export job UUID' })
+  @ApiResponse({
+    status: 202,
+    description: 'Analytics export job cancelled',
+    type: AnalyticsExportJobResponseDto,
+  })
+  async cancelExportJob(
+    @Param('jobId') jobId: string,
+    @CurrentUser() user?: { id?: string },
+  ): Promise<AnalyticsExportJobResponseDto> {
+    return this.analyticsExportService.cancelExportJob(
+      this.resolveExportUserId(user),
+      jobId,
+    );
+  }
+
   @Post('export/:dataType/jobs')
   @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.ACCEPTED)
@@ -440,14 +461,13 @@ export class StatisticsController {
   }
 
   /**
-   * Export statistics to a specific format.
-   * Supports JSON, CSV, and XLSX formats.
+   * Queue analytics export and retrieve the result asynchronously.
    */
   @Get('export/:dataType')
   @Roles(Role.ADMIN)
   @Throttle({ export: { limit: 6, ttl: 15 * 60 * 1000 } })
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Export statistics data' })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Queue analytics export job (legacy route)' })
   @ApiParam({
     name: 'dataType',
     enum: ['all', 'users', 'transactions', 'savings', 'health'],
@@ -456,7 +476,7 @@ export class StatisticsController {
   @ApiQuery({
     name: 'format',
     enum: ['json', 'csv', 'xlsx'],
-    description: 'Export format',
+    description: 'Export format for generated artifact',
   })
   @ApiQuery({
     name: 'range',
@@ -466,7 +486,11 @@ export class StatisticsController {
   })
   @ApiQuery({ name: 'fromDate', required: false, type: String })
   @ApiQuery({ name: 'toDate', required: false, type: String })
-  @ApiResponse({ status: 200, description: 'Exported statistics data or file' })
+  @ApiResponse({
+    status: 202,
+    description: 'Export job accepted for asynchronous processing',
+    type: AnalyticsExportJobResponseDto,
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({
     status: 403,
@@ -477,24 +501,16 @@ export class StatisticsController {
     @Param('dataType') dataType: string,
     @Query('format') format: string = AnalyticsExportFormat.JSON,
     @Query() query: StatisticsQueryDto,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<Record<string, unknown> | void> {
-    const artifact = await this.analyticsExportService.exportDirect(
+    @CurrentUser() user?: { id?: string },
+  ): Promise<AnalyticsExportJobResponseDto> {
+    return this.analyticsExportService.requestExportJob(
+      this.resolveExportUserId(user),
       dataType,
-      query,
-      format as AnalyticsExportFormat,
+      {
+        ...query,
+        format: format as AnalyticsExportFormat,
+      },
     );
-
-    if (artifact.format === AnalyticsExportFormat.JSON) {
-      return (artifact.body ?? {}) as Record<string, unknown>;
-    }
-
-    res.setHeader('Content-Type', artifact.contentType);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${artifact.fileName}"`,
-    );
-    res.send(artifact.buffer);
   }
 
   /**

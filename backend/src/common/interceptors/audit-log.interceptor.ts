@@ -34,6 +34,7 @@ export class AuditLogInterceptor implements NestInterceptor {
 
     // Extract correlation ID from request
     const correlationId = (request as any).correlationId || 'unknown';
+    const requestId = (request as any).requestId || correlationId;
 
     // Determine if this is a mutation endpoint (POST, PATCH, PUT, DELETE)
     const isMutation = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(
@@ -52,7 +53,7 @@ export class AuditLogInterceptor implements NestInterceptor {
     }
 
     const startTime = Date.now();
-    const auditEntry = this.buildAuditEntry(request, correlationId);
+    const auditEntry = this.buildAuditEntry(request, correlationId, requestId);
 
     return next.handle().pipe(
       tap((data) => {
@@ -78,7 +79,11 @@ export class AuditLogInterceptor implements NestInterceptor {
     );
   }
 
-  private buildAuditEntry(request: Request, correlationId: string) {
+  private buildAuditEntry(
+    request: Request,
+    correlationId: string,
+    requestId: string,
+  ) {
     const body = request.body || {};
     const params = request.params || {};
 
@@ -100,6 +105,7 @@ export class AuditLogInterceptor implements NestInterceptor {
 
     return {
       correlationId,
+      requestId,
       timestamp: new Date().toISOString(),
       endpoint: request.url,
       method: request.method,

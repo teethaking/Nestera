@@ -20,6 +20,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { TransactionsService } from './transactions.service';
+import { ReceiptService } from './receipt.service';
 import { TransactionQueryDto } from './dto/transaction-query.dto';
 import { TransactionResponseDto } from './dto/transaction-response.dto';
 import { TagTransactionDto } from './dto/tag-transaction.dto';
@@ -36,7 +37,10 @@ import { PageDto } from '../../common/dto/page.dto';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class TransactionsController {
-  constructor(private readonly transactionsService: TransactionsService) {}
+  constructor(
+    private readonly transactionsService: TransactionsService,
+    private readonly receiptService: ReceiptService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -225,5 +229,73 @@ export class TransactionsController {
       page: queryDto.page,
       limit: queryDto.limit,
     });
+  }
+
+  @Post(':id/receipt')
+  @ApiOperation({ summary: 'Generate PDF receipt for a transaction' })
+  @ApiParam({ name: 'id', description: 'Transaction UUID' })
+  @ApiResponse({ status: 200, description: 'PDF receipt generated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Transaction not found' })
+  async generateReceipt(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const pdfBuffer = await this.receiptService.generateReceipt(user.id, id);
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="nestera-receipt-${id}.pdf"`,
+    );
+    res.send(pdfBuffer);
+  }
+
+  @Get('receipts')
+  @ApiOperation({ summary: 'List all receipts for the authenticated user' })
+  @ApiResponse({ status: 200, description: 'List of receipts' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async listReceipts(@CurrentUser() user: { id: string }) {
+    return this.receiptService.listReceipts(user.id);
+  }
+
+  @Get('receipts/:id')
+  @ApiOperation({ summary: 'Download a specific receipt' })
+  @ApiParam({ name: 'id', description: 'Receipt UUID' })
+  @ApiResponse({ status: 200, description: 'PDF receipt' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Receipt not found' })
+  async downloadReceipt(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+    @Query('accessKey') accessKey?: string,
+  ): Promise<void> {
+    const { pdfData, contentType } = await this.receiptService.getReceipt(
+      user.id,
+      id,
+      accessKey,
+    );
+    
+    res.setHeader('Content-Type', contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="nestera-receipt-${id}.pdf"`,
+    );
+    res.send(pdfData);
+  }
+
+  @Delete('receipts/:id')
+  @ApiOperation({ summary: 'Delete a receipt' })
+  @ApiParam({ name: 'id', description: 'Receipt UUID' })
+  @ApiResponse({ status: 200, description: 'Receipt deleted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Receipt not found' })
+  async deleteReceipt(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+  ) {
+    return this.receiptService.deleteReceipt(user.id, id);
   }
 }

@@ -1,0 +1,12 @@
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+
+export const RequestId = createParamDecorator(
+  (data: unknown, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest();
+    return (
+      request.requestId ||
+      request.correlationId ||
+      request.headers['x-request-id']
+    );
+  },
+);

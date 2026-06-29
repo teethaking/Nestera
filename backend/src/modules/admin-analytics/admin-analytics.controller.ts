@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Request } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -65,8 +65,12 @@ export class AdminAnalyticsController {
     enum: ['previous_period', 'same_period_last_year'],
   })
   @ApiResponse({ status: 200, description: 'User analytics' })
-  async getUserAnalytics(@Query() filter: DateRangeFilterDto) {
-    return await this.analyticsService.getUserAnalytics(filter);
+  async getUserAnalytics(
+    @Query() filter: DateRangeFilterDto,
+    @Request() req: any,
+  ) {
+    const userRole = req.user?.role || Role.ADMIN;
+    return await this.analyticsService.getUserAnalytics(filter, userRole);
   }
 
   @Get('revenue')
@@ -81,8 +85,12 @@ export class AdminAnalyticsController {
   @ApiQuery({ name: 'fromDate', required: false, type: String })
   @ApiQuery({ name: 'toDate', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Revenue analytics' })
-  async getRevenueAnalytics(@Query() filter: DateRangeFilterDto) {
-    return await this.analyticsService.getRevenueAnalytics(filter);
+  async getRevenueAnalytics(
+    @Query() filter: DateRangeFilterDto,
+    @Request() req: any,
+  ) {
+    const userRole = req.user?.role || Role.ADMIN;
+    return await this.analyticsService.getRevenueAnalytics(filter, userRole);
   }
 
   @Get('savings')
@@ -97,8 +105,12 @@ export class AdminAnalyticsController {
   @ApiQuery({ name: 'fromDate', required: false, type: String })
   @ApiQuery({ name: 'toDate', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Savings analytics' })
-  async getSavingsAnalytics(@Query() filter: DateRangeFilterDto) {
-    return await this.analyticsService.getSavingsAnalytics(filter);
+  async getSavingsAnalytics(
+    @Query() filter: DateRangeFilterDto,
+    @Request() req: any,
+  ) {
+    const userRole = req.user?.role || Role.ADMIN;
+    return await this.analyticsService.getSavingsAnalytics(filter, userRole);
   }
 
   @Get('transactions')
@@ -113,7 +125,14 @@ export class AdminAnalyticsController {
   @ApiQuery({ name: 'fromDate', required: false, type: String })
   @ApiQuery({ name: 'toDate', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Transaction analytics' })
-  async getTransactionAnalytics(@Query() filter: DateRangeFilterDto) {
-    return await this.analyticsService.getTransactionAnalytics(filter);
+  async getTransactionAnalytics(
+    @Query() filter: DateRangeFilterDto,
+    @Request() req: any,
+  ) {
+    const userRole = req.user?.role || Role.ADMIN;
+    return await this.analyticsService.getTransactionAnalytics(
+      filter,
+      userRole,
+    );
   }
 }

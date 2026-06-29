@@ -9,10 +9,35 @@ import {
 import { Observable, throwError } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
 import { Request, Response } from 'express';
-import { randomUUID } from 'crypto';
+import { SecretsConfigService } from '../services/secrets-config.service';
+import { v4 as uuidv4 } from 'uuid';
 import { Logger } from 'nestjs-pino';
 import { LogSanitizerService } from '../services/log-sanitizer.service';
 import { ApmService } from '../../modules/apm/apm.service';
+
+const REDACTED_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'x-api-key',
+  'x-auth-token',
+]);
+
+function sanitizeHeaders(headers: Record<string, any>): Record<string, string> {
+  const safe: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (REDACTED_HEADERS.has(key.toLowerCase())) {
+      safe[key] = '[REDACTED]';
+    } else if (
+      typeof value === 'string' &&
+      SecretsConfigService.isSensitiveKey(key)
+    ) {
+      safe[key] = '[REDACTED]';
+    } else {
+      safe[key] = String(value);
+    }
+  }
+  return safe;
+}
 
 const SKIP_LOG_PATHS = new Set([
   '/api/health',
@@ -43,10 +68,10 @@ export class RequestLoggingInterceptor implements NestInterceptor {
     const correlationId =
       (request as Request & { correlationId?: string }).correlationId ||
       (request.headers['x-correlation-id'] as string) ||
-      randomUUID();
+      uuidv4();
 
     const startTime = Date.now();
-    const { method, ip } = request;
+    const { method, ip, url: requestUrl } = request;
     const url = this.sanitizer?.sanitizeUrl(request.url) ?? request.url;
     const rawPath = request.path ?? request.url;
 
@@ -64,6 +89,8 @@ export class RequestLoggingInterceptor implements NestInterceptor {
     const userId = reqWithUser.user?.id;
     const address = reqWithUser.user?.address;
 
+    void this.sanitizer?.sanitizeHeaders(request.headers);
+
     this.pinoLogger.log({
       msg: `→ ${method} ${url}`,
       type: 'REQUEST',
@@ -74,6 +101,12 @@ export class RequestLoggingInterceptor implements NestInterceptor {
       userId,
       address: address ? this.sanitizer?.maskAddress(address) : undefined,
       userAgent: request.headers['user-agent'],
+      contentLength: request.headers['content-length'],
+      referer: request.headers['referer'],
+      body:
+        method !== 'GET' && this.sanitizer
+          ? this.sanitizer.sanitizeBody(request.body)
+          : undefined,
     });
 
     return next.handle().pipe(
@@ -81,12 +114,7 @@ export class RequestLoggingInterceptor implements NestInterceptor {
         const duration = Date.now() - startTime;
         const statusCode = response.statusCode;
 
-        this.apmService?.trackHttpRequest(
-          method,
-          rawPath,
-          statusCode,
-          duration,
-        );
+        this.apmService?.trackHttpRequest(method, rawPath, statusCode, duration);
 
         const logPayload = {
           msg: `← ${method} ${url} ${statusCode} (${duration}ms)`,
@@ -108,13 +136,17 @@ export class RequestLoggingInterceptor implements NestInterceptor {
       catchError((error: Error & { status?: number }) => {
         const duration = Date.now() - startTime;
         const statusCode = error.status ?? 500;
+        const isClientError = statusCode < 500;
 
-        this.apmService?.trackHttpRequest(
-          method,
-          rawPath,
-          statusCode,
-          duration,
-        );
+        this.apmService?.trackHttpRequest(method, rawPath, statusCode, duration);
+        if (!isClientError) {
+          this.apmService?.trackError(error, {
+            route: rawPath,
+            method,
+            statusCode,
+            userId,
+          });
+        }
 
         const logPayload = {
           msg: `✗ ${method} ${url} ${statusCode} (${duration}ms) — ${error.message}`,
@@ -126,6 +158,8 @@ export class RequestLoggingInterceptor implements NestInterceptor {
           duration,
           userId,
           errorMessage: error.message,
+          errorName: error.constructor?.name,
+          stack: !isClientError ? error.stack : undefined,
         };
 
         if (statusCode < 500) {

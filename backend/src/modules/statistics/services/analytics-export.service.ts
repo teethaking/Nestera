@@ -194,6 +194,51 @@ export class AnalyticsExportService {
     };
   }
 
+  async cancelExportJob(
+    userId: string,
+    jobId: string,
+  ): Promise<AnalyticsExportJobResponseDto> {
+    const job = await this.exportJobRepository.findOne({
+      where: { id: jobId },
+    });
+    if (!job) {
+      throw new NotFoundException('Export job not found');
+    }
+
+    this.assertJobOwnership(job, userId);
+    this.assertNotExpired(job);
+
+    if (
+      job.status === AnalyticsExportStatus.COMPLETED ||
+      job.status === AnalyticsExportStatus.FAILED ||
+      job.status === AnalyticsExportStatus.EXPIRED ||
+      job.status === AnalyticsExportStatus.CANCELLED
+    ) {
+      return this.toJobResponse(job);
+    }
+
+    if (job.queueJobId) {
+      const queueJob = await this.exportQueue.getJob(job.queueJobId);
+      if (queueJob) {
+        await queueJob.remove().catch(() => undefined);
+      }
+    }
+
+    await this.exportJobRepository.update(job.id, {
+      status: AnalyticsExportStatus.CANCELLED,
+      completedAt: new Date(),
+      errorMessage: 'Cancelled by user',
+    });
+
+    const updated = await this.exportJobRepository.findOne({
+      where: { id: job.id },
+    });
+    if (!updated) {
+      throw new NotFoundException('Export job not found');
+    }
+    return this.toJobResponse(updated);
+  }
+
   async exportDirect(
     dataType: string,
     dto: StatisticsQueryDto,
@@ -214,6 +259,13 @@ export class AnalyticsExportService {
       throw new NotFoundException('Export job not found');
     }
 
+    if (
+      job.status === AnalyticsExportStatus.CANCELLED ||
+      job.status === AnalyticsExportStatus.EXPIRED
+    ) {
+      return;
+    }
+
     if (job.status === AnalyticsExportStatus.COMPLETED && job.filePath) {
       return;
     }
@@ -229,6 +281,12 @@ export class AnalyticsExportService {
       const filePath = path.join(this.exportDir, artifact.fileName);
 
       await fs.promises.writeFile(filePath, artifact.buffer);
+
+      const latest = await this.exportJobRepository.findOne({ where: { id: job.id } });
+      if (latest?.status === AnalyticsExportStatus.CANCELLED) {
+        await fs.promises.unlink(filePath).catch(() => undefined);
+        return;
+      }
 
       await this.exportJobRepository.update(job.id, {
         status: AnalyticsExportStatus.COMPLETED,

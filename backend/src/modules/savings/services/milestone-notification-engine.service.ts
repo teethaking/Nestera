@@ -62,7 +62,7 @@ export class MilestoneNotificationEngineService {
 
     notification.delivered = true;
     notification.deliveredAt = new Date();
-    const saved = await this.notificationRepo.save(notification);
+    const saved = (await this.notificationRepo.save(notification)) as MilestoneNotification;
 
     this.eventEmitter.emit('milestone.notification.sent', {
       userId,
@@ -87,7 +87,7 @@ export class MilestoneNotificationEngineService {
 
     const notification = this.notificationRepo.create({
       userId,
-      milestoneId: null,
+      milestoneId: null as unknown as string,
       channel: MilestoneNotificationChannel.IN_APP,
       title,
       message,
@@ -104,7 +104,7 @@ export class MilestoneNotificationEngineService {
 
     notification.delivered = true;
     notification.deliveredAt = new Date();
-    const saved = await this.notificationRepo.save(notification);
+    const saved = (await this.notificationRepo.save(notification)) as MilestoneNotification;
 
     this.eventEmitter.emit('goal.completed.notification.sent', {
       userId,

@@ -3,10 +3,13 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { OnEvent } from '@nestjs/event-emitter';
+import { Queue } from 'bullmq';
 import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,9 +30,15 @@ import {
   SavingsGoalStatus,
 } from '../savings/entities/savings-goal.entity';
 import { MailService } from '../mail/mail.service';
+import {
+  DATA_EXPORT_JOB_NAME,
+  DATA_EXPORT_LINK_TTL_MS,
+  DATA_EXPORT_PENDING_TTL_MS,
+  DATA_EXPORT_QUEUE,
+} from './data-export.constants';
 
 const EXPORT_DIR = path.join(os.tmpdir(), 'nestera-exports');
-const LINK_EXPIRY_DAYS = 7;
+const MAX_ACTIVE_EXPORTS_PER_USER = 2;
 
 @Injectable()
 export class DataExportService {
@@ -47,18 +56,29 @@ export class DataExportService {
     @InjectRepository(SavingsGoal)
     private readonly savingsGoalRepository: Repository<SavingsGoal>,
     private readonly mailService: MailService,
+    @InjectQueue(DATA_EXPORT_QUEUE)
+    private readonly dataExportQueue: Queue,
   ) {
     fs.mkdirSync(EXPORT_DIR, { recursive: true });
   }
 
-  /**
-   * Create an export request and trigger async processing.
-   */
   async requestExport(
     userId: string,
   ): Promise<{ requestId: string; message: string }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
+
+    const activeCount = await this.exportRepository.count({
+      where: [
+        { userId, status: ExportStatus.PENDING },
+        { userId, status: ExportStatus.PROCESSING },
+      ],
+    });
+    if (activeCount >= MAX_ACTIVE_EXPORTS_PER_USER) {
+      throw new ConflictException(
+        'You already have active export requests in progress. Please wait for one to complete.',
+      );
+    }
 
     const request = this.exportRepository.create({
       userId,
@@ -66,87 +86,191 @@ export class DataExportService {
     });
     const saved = await this.exportRepository.save(request);
 
-    this.logger.log(
-      `Data export requested for user ${userId}, request ${saved.id}`,
-    );
+    let queueJob;
+    try {
+      queueJob = await this.dataExportQueue.add(
+        DATA_EXPORT_JOB_NAME,
+        { requestId: saved.id },
+        {
+          jobId: saved.id,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+          removeOnComplete: false,
+          removeOnFail: false,
+        },
+      );
+    } catch (error) {
+      await this.exportRepository.update(saved.id, {
+        status: ExportStatus.FAILED,
+        errorMessage:
+          error instanceof Error ? error.message : 'Failed to queue export job',
+      });
+      throw error;
+    }
 
-    // Trigger async processing (fire-and-forget)
-    this.processExport(saved.id, user).catch((err) =>
-      this.logger.error(`Export ${saved.id} failed`, err),
-    );
+    await this.exportRepository.update(saved.id, {
+      queueJobId: String(queueJob.id ?? saved.id),
+    });
+
+    this.logger.log(`Queued data export ${saved.id} for user ${userId}`);
 
     return {
       requestId: saved.id,
       message:
-        'Export request received. You will receive an email when your data is ready.',
+        'Export request received and queued. You will receive an email when your data is ready.',
     };
   }
 
-  /**
-   * Download a ready export by token.
-   */
-  async getExportFile(
-    token: string,
-  ): Promise<{ filePath: string; userId: string }> {
+  async getExportFile(token: string): Promise<{ filePath: string; userId: string }> {
     const request = await this.exportRepository.findOne({ where: { token } });
+
     if (!request || request.status !== ExportStatus.READY) {
       throw new NotFoundException('Export not found or not ready');
     }
+
+    // Ownership enforcement
+    if (request.userId !== userId) {
+      throw new NotFoundException('Export not found or not ready');
+    }
+
     if (request.expiresAt && request.expiresAt < new Date()) {
-      await this.exportRepository.update(request.id, {
-        status: ExportStatus.EXPIRED,
-      });
+      await this.markExpiredAndCleanup(request.id, 'Export link expired');
       throw new BadRequestException('Export link has expired');
     }
+
     if (!request.filePath || !fs.existsSync(request.filePath)) {
       throw new NotFoundException('Export file not found');
     }
-    return { filePath: request.filePath, userId: request.userId };
+
+    // Path validation: ensure resolved path remains inside EXPORT_DIR.
+    const resolved = path.resolve(request.filePath);
+    const exportDirResolved = path.resolve(EXPORT_DIR);
+    if (!resolved.startsWith(exportDirResolved + path.sep)) {
+      throw new BadRequestException('Export file path is invalid');
+    }
+
+    return { filePath: resolved, userId: request.userId };
   }
 
-  /**
-   * Get export request status.
-   */
   async getExportStatus(requestId: string, userId: string) {
     const request = await this.exportRepository.findOne({
       where: { id: requestId, userId },
     });
     if (!request) throw new NotFoundException('Export request not found');
+    const refreshed = await this.applyExpirationPolicy(request);
+    const downloadUrl =
+      refreshed.status === ExportStatus.READY && refreshed.token
+        ? `/users/data/export/download/${refreshed.token}`
+        : null;
+
     return {
-      requestId: request.id,
-      status: request.status,
-      createdAt: request.createdAt,
-      completedAt: request.completedAt,
-      expiresAt: request.expiresAt,
+      requestId: refreshed.id,
+      status: refreshed.status,
+      createdAt: refreshed.createdAt,
+      completedAt: refreshed.completedAt,
+      expiresAt: refreshed.expiresAt,
+      errorMessage: refreshed.errorMessage,
+      downloadUrl,
     };
   }
 
-  /**
-   * List all export requests for a user (history/log).
-   */
   async getExportHistory(userId: string) {
     const requests = await this.exportRepository.find({
       where: { userId },
       order: { createdAt: 'DESC' },
       take: 50,
     });
-    return requests.map(
-      ({ id, status, createdAt, completedAt, expiresAt }) => ({
+    const normalized = await Promise.all(
+      requests.map((request) => this.applyExpirationPolicy(request)),
+    );
+
+    return normalized.map(
+      ({ id, status, createdAt, completedAt, expiresAt, errorMessage }) => ({
         requestId: id,
         status,
         createdAt,
         completedAt,
         expiresAt,
+        errorMessage,
       }),
     );
   }
 
-  /**
-   * Async: build ZIP, update record, email user.
-   */
-  private async processExport(requestId: string, user: User): Promise<void> {
-    await this.exportRepository.update(requestId, {
+  async cancelExport(
+    requestId: string,
+    userId: string,
+  ): Promise<{ requestId: string; status: ExportStatus; message: string }> {
+    const request = await this.exportRepository.findOne({
+      where: { id: requestId, userId },
+    });
+    if (!request) {
+      throw new NotFoundException('Export request not found');
+    }
+
+    if (
+      request.status === ExportStatus.FAILED ||
+      request.status === ExportStatus.EXPIRED ||
+      request.status === ExportStatus.CANCELLED
+    ) {
+      return {
+        requestId: request.id,
+        status: request.status,
+        message: `Export request is already ${request.status}`,
+      };
+    }
+
+    if (request.status === ExportStatus.READY) {
+      throw new BadRequestException(
+        'Completed exports cannot be cancelled. They will expire automatically.',
+      );
+    }
+
+    await this.removeQueueJob(request.queueJobId);
+    await this.exportRepository.update(request.id, {
+      status: ExportStatus.CANCELLED,
+      completedAt: new Date(),
+      errorMessage: 'Cancelled by user',
+    });
+    await this.deleteExportFile(request.filePath);
+
+    return {
+      requestId: request.id,
+      status: ExportStatus.CANCELLED,
+      message: 'Export request cancelled',
+    };
+  }
+
+  async processExportJob(requestId: string): Promise<void> {
+    const request = await this.exportRepository.findOne({ where: { id: requestId } });
+    if (!request) {
+      throw new NotFoundException('Export request not found');
+    }
+
+    if (
+      request.status === ExportStatus.CANCELLED ||
+      request.status === ExportStatus.EXPIRED ||
+      request.status === ExportStatus.READY
+    ) {
+      return;
+    }
+
+    if (Date.now() - request.createdAt.getTime() > DATA_EXPORT_PENDING_TTL_MS) {
+      await this.markExpiredAndCleanup(request.id, 'Export request timed out');
+      return;
+    }
+
+    const user = await this.userRepository.findOne({ where: { id: request.userId } });
+    if (!user) {
+      await this.exportRepository.update(request.id, {
+        status: ExportStatus.FAILED,
+        errorMessage: 'User not found',
+      });
+      throw new NotFoundException('User not found');
+    }
+
+    await this.exportRepository.update(request.id, {
       status: ExportStatus.PROCESSING,
+      errorMessage: null,
     });
 
     try {
@@ -156,7 +280,7 @@ export class DataExportService {
         this.savingsGoalRepository.find({ where: { userId: user.id } }),
       ]);
 
-      const zipPath = path.join(EXPORT_DIR, `${requestId}.zip`);
+      const zipPath = path.join(EXPORT_DIR, `${request.id}.zip`);
       await this.buildZip(zipPath, {
         'profile.json': {
           id: user.id,
@@ -169,31 +293,59 @@ export class DataExportService {
         'notifications.json': notifications,
       });
 
-      const token = randomBytes(32).toString('hex');
-      const expiresAt = new Date(Date.now() + LINK_EXPIRY_DAYS * 86_400_000);
+      const latest = await this.exportRepository.findOne({ where: { id: request.id } });
+      if (latest?.status === ExportStatus.CANCELLED) {
+        await this.deleteExportFile(zipPath);
+        return;
+      }
 
-      await this.exportRepository.update(requestId, {
+      const token = randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + DATA_EXPORT_LINK_TTL_MS);
+      await this.exportRepository.update(request.id, {
         status: ExportStatus.READY,
         token,
         filePath: zipPath,
         expiresAt,
         completedAt: new Date(),
+        errorMessage: null,
       });
 
-      // Email the download link
       const downloadUrl = `/users/data/export/download/${token}`;
       await this.mailService.sendRawMail(
         user.email,
         'Your Nestera data export is ready',
-        `Hi ${user.name || 'there'},\n\nYour data export is ready. Download it here:\n${downloadUrl}\n\nThis link expires in ${LINK_EXPIRY_DAYS} days.\n\nNestera Team`,
+        `Hi ${user.name || 'there'},\n\nYour data export is ready. Download it here:\n${downloadUrl}\n\nThis link expires in 7 days.\n\nNestera Team`,
       );
 
-      this.logger.log(`Export ${requestId} completed for user ${user.id}`);
+      this.logger.log(`Export ${request.id} completed for user ${user.id}`);
     } catch (err) {
-      await this.exportRepository.update(requestId, {
+      const latest = await this.exportRepository.findOne({ where: { id: request.id } });
+      if (latest?.status === ExportStatus.CANCELLED) {
+        return;
+      }
+
+      await this.exportRepository.update(request.id, {
         status: ExportStatus.FAILED,
+        errorMessage: err instanceof Error ? err.message : 'Export failed',
       });
       throw err;
+    }
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async expireOldExports(): Promise<void> {
+    const requests = await this.exportRepository.find({
+      where: [
+        { status: ExportStatus.PENDING },
+        { status: ExportStatus.PROCESSING },
+        { status: ExportStatus.READY },
+      ],
+      take: 500,
+      order: { createdAt: 'ASC' },
+    });
+
+    for (const request of requests) {
+      await this.applyExpirationPolicy(request);
     }
   }
 
@@ -309,5 +461,71 @@ export class DataExportService {
 
       archive.finalize();
     });
+  }
+
+  private async applyExpirationPolicy(
+    request: DataExportRequest,
+  ): Promise<DataExportRequest> {
+    if (
+      (request.status === ExportStatus.PENDING ||
+        request.status === ExportStatus.PROCESSING) &&
+      Date.now() - request.createdAt.getTime() > DATA_EXPORT_PENDING_TTL_MS
+    ) {
+      await this.markExpiredAndCleanup(request.id, 'Export request timed out');
+      const updated = await this.exportRepository.findOne({ where: { id: request.id } });
+      return updated ?? request;
+    }
+
+    if (
+      request.status === ExportStatus.READY &&
+      request.expiresAt &&
+      request.expiresAt.getTime() < Date.now()
+    ) {
+      await this.markExpiredAndCleanup(request.id, 'Export link expired');
+      const updated = await this.exportRepository.findOne({ where: { id: request.id } });
+      return updated ?? request;
+    }
+
+    return request;
+  }
+
+  private async markExpiredAndCleanup(
+    requestId: string,
+    reason = 'Export expired',
+  ): Promise<void> {
+    const request = await this.exportRepository.findOne({ where: { id: requestId } });
+    if (!request) {
+      return;
+    }
+
+    await this.removeQueueJob(request.queueJobId);
+    await this.deleteExportFile(request.filePath);
+    await this.exportRepository.update(request.id, {
+      status: ExportStatus.EXPIRED,
+      token: null,
+      filePath: null,
+      errorMessage: reason,
+    });
+  }
+
+  private async removeQueueJob(queueJobId?: string | null): Promise<void> {
+    if (!queueJobId) {
+      return;
+    }
+    const queueJob = await this.dataExportQueue.getJob(queueJobId);
+    if (queueJob) {
+      await queueJob.remove().catch(() => undefined);
+    }
+  }
+
+  private async deleteExportFile(filePath?: string | null): Promise<void> {
+    if (!filePath) {
+      return;
+    }
+    try {
+      await fs.promises.unlink(filePath);
+    } catch {
+      // Ignore missing files during cleanup.
+    }
   }
 }

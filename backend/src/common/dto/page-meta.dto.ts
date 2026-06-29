@@ -1,9 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PageOptionsDto } from './page-options.dto';
-
 export interface PageMetaDtoParameters {
-  pageOptionsDto: PageOptionsDto;
-  totalItemCount: number;
+  pageOptionsDto: {
+    page?: number;
+    pageSize?: number;
+  };
+  totalItemCount?: number;
+  nextCursor?: string | null;
 }
 
 export class PageMetaDto {
@@ -13,11 +15,17 @@ export class PageMetaDto {
   @ApiProperty({ description: 'Number of items per page' })
   readonly limit: number;
 
+  @ApiProperty({ description: 'Standardized page size field' })
+  readonly pageSize: number;
+
   @ApiProperty({ description: 'Total number of items' })
-  readonly totalItemCount: number;
+  readonly totalItemCount?: number;
+
+  @ApiProperty({ required: false, description: 'Optional total count field' })
+  readonly totalCount?: number;
 
   @ApiProperty({ description: 'Total number of pages' })
-  readonly pageCount: number;
+  readonly pageCount: number | null;
 
   @ApiProperty({ description: 'Whether there is a previous page' })
   readonly hasPreviousPage: boolean;
@@ -25,12 +33,32 @@ export class PageMetaDto {
   @ApiProperty({ description: 'Whether there is a next page' })
   readonly hasNextPage: boolean;
 
-  constructor({ pageOptionsDto, totalItemCount }: PageMetaDtoParameters) {
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    description: 'Cursor token for the next page',
+  })
+  readonly nextCursor: string | null;
+
+  constructor({
+    pageOptionsDto,
+    totalItemCount,
+    nextCursor,
+  }: PageMetaDtoParameters) {
     this.page = pageOptionsDto.page ?? 1;
-    this.limit = pageOptionsDto.limit ?? 10;
+    this.limit = pageOptionsDto.pageSize ?? 10;
+    this.pageSize = pageOptionsDto.pageSize ?? 10;
     this.totalItemCount = totalItemCount;
-    this.pageCount = Math.ceil(totalItemCount / this.limit);
+    this.totalCount = totalItemCount;
+    this.pageCount =
+      typeof totalItemCount === 'number'
+        ? Math.ceil(totalItemCount / this.limit)
+        : null;
     this.hasPreviousPage = this.page > 1;
-    this.hasNextPage = this.page < this.pageCount;
+    this.nextCursor = nextCursor ?? null;
+    this.hasNextPage =
+      typeof totalItemCount === 'number'
+        ? this.page < (this.pageCount ?? 0)
+        : Boolean(this.nextCursor);
   }
 }

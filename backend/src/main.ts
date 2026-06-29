@@ -6,10 +6,10 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import compression from 'compression';
+import helmet from 'helmet';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
-import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { EnhancedExceptionFilter } from './common/filters/enhanced-exception.filter';
 import { ErrorCodeRegistry } from './common/services/error-code-registry.service';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
@@ -20,6 +20,17 @@ import {
 import { VersionAnalyticsInterceptor } from './common/versioning/version-analytics.interceptor';
 import { VersionAnalyticsService } from './common/versioning/version-analytics.service';
 import { GracefulShutdownService } from './common/services/graceful-shutdown.service';
+import { ContractCompatibilityService } from './common/services/contract-compatibility.service';
+import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
+
+type AppCorsConfig = {
+  enabled: boolean;
+  origins: string[];
+  methods: string[];
+  allowedHeaders: string[];
+  credentials: boolean;
+  maxAge: number;
+};
 
 async function flushApplicationLogs(
   app: INestApplication,
@@ -49,6 +60,19 @@ async function bootstrap() {
   app.useLogger(app.get(Logger));
   const configService = app.get(ConfigService);
   const port = configService.get<number>('port');
+  const corsConfig = configService.get<AppCorsConfig>('cors');
+
+  // Perform contract-backend compatibility check on startup
+  try {
+    const contractCompatibility = app.get(ContractCompatibilityService);
+    await contractCompatibility.performStartupCheck();
+  } catch (error) {
+    console.error(
+      '[Bootstrap] Contract compatibility check failed. Application will exit.',
+      error,
+    );
+    process.exit(1);
+  }
 
   app.use(
     compression({
@@ -56,12 +80,54 @@ async function bootstrap() {
     }),
   );
 
-  app.setGlobalPrefix('api');
-  app.enableVersioning({
-    type: VersioningType.URI,
-    defaultVersion: '1',
+  app.use(
+    helmet({
+      // API serves JSON; disable CSP to avoid breaking Swagger UI assets.
+      contentSecurityPolicy: false,
+      frameguard: { action: 'deny' }, // clickjacking protection
+      noSniff: true, // MIME sniffing protection
+      referrerPolicy: { policy: 'no-referrer' },
+      crossOriginResourcePolicy: { policy: 'same-site' },
+    }),
+  );
+  app.use((_req, res, next) => {
+    // Legacy browser signal for additional reflected-XSS mitigation.
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
   });
-  app.useGlobalFilters(new AllExceptionsFilter());
+
+  if (corsConfig?.enabled) {
+    const allowedOrigins = corsConfig.origins;
+    const methods = corsConfig.methods;
+    const allowedHeaders = corsConfig.allowedHeaders;
+    const credentials =
+      corsConfig.credentials && !allowedOrigins.some((origin) => origin === '*');
+
+    const corsOptions: CorsOptions = {
+      origin: (origin, callback) => {
+        // Allow non-browser clients (no Origin header).
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+
+        if (allowedOrigins.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+
+        callback(new Error(`Origin ${origin} is not allowed by CORS`), false);
+      },
+      credentials,
+      methods,
+      allowedHeaders,
+      optionsSuccessStatus: 204,
+      maxAge: corsConfig.maxAge,
+    };
+
+    app.enableCors(corsOptions);
+  }
+
   app.setGlobalPrefix('api');
   app.enableVersioning({
     type: VersioningType.URI,
@@ -97,26 +163,7 @@ async function bootstrap() {
     }),
   );
 
-  // Swagger setup
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Nestera API')
-    .setDescription(
-      'API documentation for the Nestera platform (URI versioned, e.g., /v1/)',
-    )
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
-
-  await app.listen(port || 3001);
-  console.log(
-    `Application is running on: http://localhost:${port}/api (with URI versioning, e.g., /v1/)`,
-  );
-  console.log(
-    `Swagger docs available at: http://localhost:${port}/api/docs (shows versioned endpoints)`,
-  );
-  // ── Swagger / OpenAPI setup ───────────────────────────────────────────────
+  // Swagger / OpenAPI setup
   const rateLimitDescription = `
 ## Authentication
 
@@ -233,27 +280,14 @@ The API supports URI-based versioning (\`/api/v1/...\` and \`/api/v2/...\`).
   SwaggerModule.setup('api/docs', app, combinedDoc);
 
   app.enableShutdownHooks();
-
-  const server = await app.listen(port || 3001);
-  // Redirect /api/docs → /api/v2/docs for convenience
-  const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.get(
-    '/api/docs',
-    (_req: unknown, res: { redirect: (url: string) => void }) => {
-      res.redirect('/api/v2/docs');
-    },
-  );
-
   await app.listen(port || 3001);
   const logger = app.get(Logger);
   const gracefulShutdown = app.get(GracefulShutdownService);
   gracefulShutdown.registerHttpServer(app.getHttpServer());
   logger.log(`Application is running on: http://localhost:${port}/api`);
   logger.log(`Swagger docs (current):    http://localhost:${port}/api/docs`);
+  logger.log(`Swagger v1 docs:           http://localhost:${port}/api/v1/docs`);
   logger.log(`Swagger v2 docs:           http://localhost:${port}/api/v2/docs`);
-  logger.log(
-    `Swagger v1 docs (deprecated): http://localhost:${port}/api/v1/docs`,
-  );
 
   const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT'];
   for (const signal of signals) {

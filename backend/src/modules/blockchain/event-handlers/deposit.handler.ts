@@ -6,6 +6,7 @@ import { scValToNative, xdr } from '@stellar/stellar-sdk';
 import {
   LedgerTransaction,
   LedgerTransactionType,
+  LedgerTransactionStatus,
 } from '../entities/transaction.entity';
 import {
   SubscriptionStatus,
@@ -13,6 +14,7 @@ import {
 } from '../../savings/entities/user-subscription.entity';
 import { User } from '../../user/entities/user.entity';
 import { SavingsProduct } from '../../savings/entities/savings-product.entity';
+import { TransactionStateMachineService } from '../../transactions/transaction-state-machine.service';
 
 interface IndexerEvent {
   id?: string;
@@ -35,7 +37,10 @@ export class DepositHandler {
     .update('Deposit')
     .digest('hex');
 
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly transactionStateMachine: TransactionStateMachineService,
+  ) {}
 
   async handle(event: IndexerEvent): Promise<boolean> {
     if (!this.isDepositTopic(event.topic)) {
@@ -72,14 +77,14 @@ export class DepositHandler {
         return;
       }
 
-      await txRepo.save(
-        txRepo.create({
+      const createdTx = await this.transactionStateMachine.createTransaction(
+        {
           userId: user.id,
           type: LedgerTransactionType.DEPOSIT,
           amount: payload.amount,
           publicKey: payload.publicKey,
           eventId,
-          transactionHash:
+          txHash:
             typeof event.txHash === 'string' ? event.txHash : null,
           ledgerSequence:
             typeof event.ledger === 'number' ? String(event.ledger) : null,
@@ -87,7 +92,40 @@ export class DepositHandler {
             topic: event.topic,
             rawValueType: typeof event.value,
           },
-        }),
+        },
+        {
+          manager,
+          actor: 'blockchain-indexer',
+          reason: 'Deposit event ingested',
+          metadata: { eventId },
+        },
+      );
+      await this.transactionStateMachine.transitionStatus(
+        createdTx.id,
+        LedgerTransactionStatus.PENDING_CONFIRMATION,
+        {
+          manager,
+          actor: 'blockchain-indexer',
+          reason: 'Deposit pending confirmation',
+        },
+      );
+      await this.transactionStateMachine.transitionStatus(
+        createdTx.id,
+        LedgerTransactionStatus.CONFIRMED,
+        {
+          manager,
+          actor: 'blockchain-indexer',
+          reason: 'Deposit confirmed on ledger',
+        },
+      );
+      await this.transactionStateMachine.transitionStatus(
+        createdTx.id,
+        LedgerTransactionStatus.COMPLETED,
+        {
+          manager,
+          actor: 'blockchain-indexer',
+          reason: 'Deposit workflow completed',
+        },
       );
 
       const amountAsNumber = Number(payload.amount);

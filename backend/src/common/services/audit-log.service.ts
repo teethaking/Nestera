@@ -9,6 +9,7 @@ import {
 
 export interface CreateAuditLogDto {
   correlationId?: string;
+  requestId?: string;
   endpoint?: string;
   method?: string;
   action?: AuditAction;

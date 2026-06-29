@@ -27,6 +27,7 @@ export enum AnalyticsExportStatus {
   COMPLETED = 'completed',
   FAILED = 'failed',
   EXPIRED = 'expired',
+  CANCELLED = 'cancelled',
 }
 
 @Entity('analytics_export_jobs')

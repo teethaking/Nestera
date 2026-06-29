@@ -51,6 +51,8 @@ import {
 import { RecommendationResponseDto } from './dto/recommendation-response.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CorrelationId } from '../../common/decorators/correlation-id.decorator';
+import { RequestId } from '../../common/decorators/request-id.decorator';
 import { RpcThrottleGuard } from '../../common/guards/rpc-throttle.guard';
 import { Idempotent } from '../../common/decorators/idempotent.decorator';
 import { RecommendationService } from './services/recommendation.service';
@@ -235,11 +237,16 @@ export class SavingsController {
   async subscribe(
     @Body() dto: SubscribeDto,
     @CurrentUser() user: { id: string; email: string },
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<UserSubscription> {
     return await this.savingsService.subscribe(
       user.id,
       dto.productId,
       dto.amount,
+      false,
+      correlationId,
+      requestId,
     );
   }
 
@@ -269,12 +276,16 @@ export class SavingsController {
   async withdraw(
     @Body() dto: WithdrawDto,
     @CurrentUser() user: { id: string; email: string },
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<WithdrawalResponseDto> {
     const withdrawal = await this.savingsService.createWithdrawalRequest(
       user.id,
       dto.subscriptionId,
       dto.amount,
       dto.reason,
+      correlationId,
+      requestId,
     );
 
     return {

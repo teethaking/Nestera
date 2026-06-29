@@ -5,6 +5,7 @@ import {
   ConflictException,
   Logger,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { ConfigService } from '@nestjs/config';
@@ -46,12 +47,17 @@ import { User } from '../user/entities/user.entity';
 import { SavingsService as BlockchainSavingsService } from '../blockchain/savings.service';
 import { PredictiveEvaluatorService } from './services/predictive-evaluator.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { SavingsProductVersionAudit } from './entities/savings-product-version-audit.entity';
 import { WaitlistService } from './waitlist.service';
 import { MilestoneService } from './services/milestone.service';
+import { AuditLogService } from '../../common/services/audit-log.service';
+import {
+  AuditAction,
+  AuditResourceType,
+} from '../../common/entities/audit-log.entity';
+import { TransactionStateMachineService } from '../transactions/transaction-state-machine.service';
 
 export type SavingsGoalProgress = GoalProgressDto;
 
@@ -119,14 +125,14 @@ export class SavingsService {
     private readonly productVersionAuditRepository: Repository<SavingsProductVersionAudit>,
     @InjectRepository(WithdrawalRequest)
     private readonly withdrawalRepository: Repository<WithdrawalRequest>,
-    @InjectRepository(Transaction)
-    private readonly transactionRepository: Repository<Transaction>,
+    private readonly transactionStateMachine: TransactionStateMachineService,
     private readonly blockchainSavingsService: BlockchainSavingsService,
     private readonly predictiveEvaluatorService: PredictiveEvaluatorService,
     private readonly milestoneService: MilestoneService,
     private readonly waitlistService: WaitlistService,
     private readonly configService: ConfigService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly auditLogService: AuditLogService,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
@@ -449,6 +455,8 @@ export class SavingsService {
     productId: string,
     amount: number,
     overrideLimits = false,
+    correlationId?: string,
+    requestId?: string,
   ): Promise<UserSubscription> {
     const product = await this.findOneProduct(productId);
     await this.syncCapacityState(product);
@@ -538,6 +546,18 @@ export class SavingsService {
 
     // Record waitlist conversion if the user was on the waitlist
     await this.waitlistService.recordConversion(userId, product.id);
+
+    await this.auditLogService.log({
+      action: AuditAction.DEPOSIT,
+      resourceType: AuditResourceType.SAVINGS,
+      actor: userId,
+      correlationId,
+      requestId,
+      resourceId: savedSubscription.id,
+      description: `User subscribed to savings product ${product.name} with amount ${amount}`,
+      newValue: { productId, amount, subscriptionId: savedSubscription.id },
+      success: true,
+    });
 
     return savedSubscription;
   }
@@ -1043,16 +1063,29 @@ export class SavingsService {
 
     await this.subscribe(userId, resolvedProductId, amount, true);
 
-    const tx = this.transactionRepository.create({
+    const tx = await this.transactionStateMachine.createTransaction(
+      {
       userId,
       type: TxType.DEPOSIT,
       amount: String(amount),
-      status: TxStatus.COMPLETED,
       poolId: resolvedProductId,
       metadata: { goalId, goalName: goal.goalName, transferType: 'GOAL_AUTO' },
       txHash: `goal-transfer-${goalId}-${Date.now()}`,
+      },
+      { actor: 'savings-service', reason: 'Goal transfer initiated' },
+    );
+    await this.transactionStateMachine.transitionStatus(tx.id, TxStatus.PENDING_CONFIRMATION, {
+      actor: 'savings-service',
+      reason: 'Transfer awaiting confirmation',
     });
-    return this.transactionRepository.save(tx);
+    await this.transactionStateMachine.transitionStatus(tx.id, TxStatus.CONFIRMED, {
+      actor: 'savings-service',
+      reason: 'Transfer confirmed',
+    });
+    return this.transactionStateMachine.transitionStatus(tx.id, TxStatus.COMPLETED, {
+      actor: 'savings-service',
+      reason: 'Goal transfer completed',
+    });
   }
 
   async createWithdrawalRequest(
@@ -1060,6 +1093,8 @@ export class SavingsService {
     subscriptionId: string,
     amount: number,
     reason?: string,
+    correlationId?: string,
+    requestId?: string,
   ): Promise<WithdrawalRequest> {
     const subscription = await this.subscriptionRepository.findOne({
       where: { id: subscriptionId, userId },
@@ -1106,10 +1141,24 @@ export class SavingsService {
     const saved = await this.withdrawalRepository.save(withdrawalRequest);
 
     // Process withdrawal asynchronously
-    this.processWithdrawal(saved.id).catch((error) => {
-      this.logger.error(
-        `Failed to process withdrawal ${saved.id}: ${(error as Error).message}`,
-      );
+    this.processWithdrawal(saved.id, correlationId, requestId).catch(
+      (error) => {
+        this.logger.error(
+          `Failed to process withdrawal ${saved.id}: ${(error as Error).message}`,
+        );
+      },
+    );
+
+    await this.auditLogService.log({
+      action: AuditAction.WITHDRAW,
+      resourceType: AuditResourceType.WITHDRAWAL_REQUEST,
+      actor: userId,
+      correlationId,
+      requestId,
+      resourceId: saved.id,
+      description: `User requested withdrawal of ${amount} from subscription ${subscriptionId}${reason ? `: ${reason}` : ''}`,
+      newValue: { subscriptionId, amount, penalty, netAmount, reason },
+      success: true,
     });
 
     return saved;
@@ -1138,7 +1187,11 @@ export class SavingsService {
     return Number(penalty.toFixed(7));
   }
 
-  private async processWithdrawal(withdrawalId: string): Promise<void> {
+  private async processWithdrawal(
+    withdrawalId: string,
+    correlationId?: string,
+    requestId?: string,
+  ): Promise<void> {
     const withdrawal = await this.withdrawalRepository.findOne({
       where: { id: withdrawalId },
       relations: ['subscription', 'subscription.product'],
@@ -1147,6 +1200,8 @@ export class SavingsService {
     if (!withdrawal) {
       throw new NotFoundException(`Withdrawal ${withdrawalId} not found`);
     }
+
+    let transactionId: string | null = null;
 
     try {
       // Update status to processing
@@ -1176,22 +1231,43 @@ export class SavingsService {
       }
 
       // Record in transaction ledger
-      const transaction = this.transactionRepository.create({
-        userId: withdrawal.userId,
-        type: TxType.WITHDRAW,
-        amount: String(withdrawal.netAmount),
-        status: TxStatus.COMPLETED,
-        publicKey: user?.publicKey || null,
-        metadata: {
-          withdrawalRequestId: withdrawal.id,
-          grossAmount: String(withdrawal.amount),
-          penalty: String(withdrawal.penalty),
-          netAmount: String(withdrawal.netAmount),
-          subscriptionId: withdrawal.subscriptionId,
-          reason: withdrawal.reason,
+      const transaction = await this.transactionStateMachine.createTransaction(
+        {
+          userId: withdrawal.userId,
+          type: TxType.WITHDRAW,
+          amount: String(withdrawal.netAmount),
+          publicKey: user?.publicKey || null,
+          metadata: {
+            withdrawalRequestId: withdrawal.id,
+            grossAmount: String(withdrawal.amount),
+            penalty: String(withdrawal.penalty),
+            netAmount: String(withdrawal.netAmount),
+            subscriptionId: withdrawal.subscriptionId,
+            reason: withdrawal.reason,
+          },
         },
+        {
+          actor: 'savings-service',
+          reason: 'Withdrawal ledger transaction created',
+        },
+      );
+      transactionId = transaction.id;
+      await this.transactionStateMachine.transitionStatus(
+        transaction.id,
+        TxStatus.PENDING_CONFIRMATION,
+        {
+          actor: 'savings-service',
+          reason: 'Withdrawal awaiting confirmation',
+        },
+      );
+      await this.transactionStateMachine.transitionStatus(transaction.id, TxStatus.CONFIRMED, {
+        actor: 'savings-service',
+        reason: 'Withdrawal confirmed',
       });
-      await this.transactionRepository.save(transaction);
+      await this.transactionStateMachine.transitionStatus(transaction.id, TxStatus.COMPLETED, {
+        actor: 'savings-service',
+        reason: 'Withdrawal completed',
+      });
 
       // Update subscription amount
       const newAmount =
@@ -1210,6 +1286,23 @@ export class SavingsService {
       withdrawal.completedAt = new Date();
       await this.withdrawalRepository.save(withdrawal);
 
+      await this.auditLogService.log({
+        action: AuditAction.WITHDRAW,
+        resourceType: AuditResourceType.WITHDRAWAL_REQUEST,
+        actor: withdrawal.userId,
+        correlationId,
+        requestId,
+        resourceId: withdrawal.id,
+        description: `Withdrawal ${withdrawalId} processed successfully — net ${withdrawal.netAmount}`,
+        newValue: {
+          status: WithdrawalStatus.COMPLETED,
+          txHash: transaction.txHash,
+          netAmount: withdrawal.netAmount,
+          penalty: withdrawal.penalty,
+        },
+        success: true,
+      });
+
       // Emit event for notification
       this.eventEmitter?.emit('withdrawal.completed', {
         userId: withdrawal.userId,
@@ -1220,8 +1313,41 @@ export class SavingsService {
         timestamp: new Date(),
       });
     } catch (error) {
+      if (transactionId) {
+        try {
+          await this.transactionStateMachine.transitionStatus(
+            transactionId,
+            TxStatus.FAILED,
+            {
+              actor: 'savings-service',
+              reason: 'Withdrawal processing failed',
+              metadata: {
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : 'Unknown withdrawal error',
+              },
+            },
+          );
+        } catch {
+          // If transition is not valid from current state, keep original error flow.
+        }
+      }
       withdrawal.status = WithdrawalStatus.FAILED;
       await this.withdrawalRepository.save(withdrawal);
+
+      await this.auditLogService.log({
+        action: AuditAction.WITHDRAW,
+        resourceType: AuditResourceType.WITHDRAWAL_REQUEST,
+        actor: withdrawal.userId,
+        correlationId,
+        requestId,
+        resourceId: withdrawal.id,
+        description: `Withdrawal ${withdrawalId} failed: ${(error as Error).message}`,
+        errorMessage: (error as Error).message,
+        success: false,
+      });
+
       throw error;
     }
   }

@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsBooleanString,
   IsEnum,
   IsInt,
   IsISO8601,
@@ -9,6 +10,10 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+} from '../../../common/dto/page-options.dto';
 
 export class AdminUsersQueryDto {
   @ApiPropertyOptional({ minimum: 1, default: 1 })
@@ -18,13 +23,32 @@ export class AdminUsersQueryDto {
   @IsOptional()
   page?: number = 1;
 
-  @ApiPropertyOptional({ minimum: 1, maximum: 100, default: 20 })
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: MAX_PAGE_SIZE,
+    default: DEFAULT_PAGE_SIZE,
+  })
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(MAX_PAGE_SIZE)
   @IsOptional()
-  limit?: number = 20;
+  limit?: number = DEFAULT_PAGE_SIZE;
+
+  @ApiPropertyOptional({
+    description: 'Opaque cursor for cursor-based pagination',
+  })
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
+  @ApiPropertyOptional({
+    description: 'Set to true to include totalCount metadata',
+    default: false,
+  })
+  @IsOptional()
+  @IsBooleanString()
+  includeTotal?: string;
 
   @ApiPropertyOptional({ description: 'Search by name or email' })
   @IsString()
@@ -66,6 +90,15 @@ export class AdminUsersQueryDto {
   status?: 'active' | 'inactive';
 
   get skip(): number {
-    return ((this.page ?? 1) - 1) * (this.limit ?? 20);
+    return ((this.page ?? 1) - 1) * this.pageSize;
+  }
+
+  get pageSize(): number {
+    const candidate = this.limit ?? DEFAULT_PAGE_SIZE;
+    return Math.min(Math.max(candidate, 1), MAX_PAGE_SIZE);
+  }
+
+  get shouldIncludeTotal(): boolean {
+    return String(this.includeTotal).toLowerCase() === 'true';
   }
 }

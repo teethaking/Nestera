@@ -13,6 +13,7 @@ import {
   UserSubscription,
 } from '../../savings/entities/user-subscription.entity';
 import { User } from '../../user/entities/user.entity';
+import { TransactionStateMachineService } from '../../transactions/transaction-state-machine.service';
 
 interface IndexerEvent {
   id?: string;
@@ -35,7 +36,10 @@ export class WithdrawHandler {
     .update('Withdraw')
     .digest('hex');
 
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly transactionStateMachine: TransactionStateMachineService,
+  ) {}
 
   async handle(event: IndexerEvent): Promise<boolean> {
     if (!this.isWithdrawTopic(event.topic)) {
@@ -71,15 +75,14 @@ export class WithdrawHandler {
         return;
       }
 
-      await txRepo.save(
-        txRepo.create({
+      const createdTx = await this.transactionStateMachine.createTransaction(
+        {
           userId: user.id,
           type: LedgerTransactionType.WITHDRAW,
           amount: payload.amount,
           publicKey: payload.publicKey,
           eventId,
-          status: LedgerTransactionStatus.COMPLETED,
-          transactionHash:
+          txHash:
             typeof event.txHash === 'string' ? event.txHash : null,
           ledgerSequence:
             typeof event.ledger === 'number' ? String(event.ledger) : null,
@@ -87,7 +90,40 @@ export class WithdrawHandler {
             topic: event.topic,
             rawValueType: typeof event.value,
           },
-        }),
+        },
+        {
+          manager,
+          actor: 'blockchain-indexer',
+          reason: 'Withdraw event ingested',
+          metadata: { eventId },
+        },
+      );
+      await this.transactionStateMachine.transitionStatus(
+        createdTx.id,
+        LedgerTransactionStatus.PENDING_CONFIRMATION,
+        {
+          manager,
+          actor: 'blockchain-indexer',
+          reason: 'Withdraw pending confirmation',
+        },
+      );
+      await this.transactionStateMachine.transitionStatus(
+        createdTx.id,
+        LedgerTransactionStatus.CONFIRMED,
+        {
+          manager,
+          actor: 'blockchain-indexer',
+          reason: 'Withdraw confirmed on ledger',
+        },
+      );
+      await this.transactionStateMachine.transitionStatus(
+        createdTx.id,
+        LedgerTransactionStatus.COMPLETED,
+        {
+          manager,
+          actor: 'blockchain-indexer',
+          reason: 'Withdraw workflow completed',
+        },
       );
 
       const amountAsNumber = Number(payload.amount);

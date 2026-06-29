@@ -32,6 +32,9 @@ export enum AuditAction {
   RESOLVE = 'RESOLVE',
   ASSIGN = 'ASSIGN',
   EXPORT = 'EXPORT',
+  DEPOSIT = 'DEPOSIT',
+  WITHDRAW = 'WITHDRAW',
+  VOTE = 'VOTE',
 }
 
 export enum AuditResourceType {
@@ -46,6 +49,7 @@ export enum AuditResourceType {
   ADMIN = 'ADMIN',
   WITHDRAWAL_REQUEST = 'WITHDRAWAL_REQUEST',
   SYSTEM = 'SYSTEM',
+  GOVERNANCE = 'GOVERNANCE',
 }
 
 @Entity('audit_logs')
@@ -61,6 +65,9 @@ export class AuditLog {
 
   @Column({ nullable: true })
   correlationId: string;
+
+  @Column({ nullable: true })
+  requestId: string;
 
   @CreateDateColumn()
   timestamp: Date;

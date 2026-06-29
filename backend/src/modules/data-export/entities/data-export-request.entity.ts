@@ -12,6 +12,7 @@ export enum ExportStatus {
   READY = 'ready',
   EXPIRED = 'expired',
   FAILED = 'failed',
+  CANCELLED = 'cancelled',
 }
 
 @Entity('data_export_requests')
@@ -36,6 +37,12 @@ export class DataExportRequest {
 
   @Column({ type: 'varchar', nullable: true })
   filePath: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  queueJobId: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  errorMessage: string | null;
 
   @Column({ type: 'timestamp', nullable: true })
   expiresAt: Date | null;

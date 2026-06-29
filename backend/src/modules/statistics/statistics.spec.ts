@@ -699,7 +699,7 @@ describe('Statistics API (e2e)', () => {
         .get('/admin/statistics/export/all')
         .set('Authorization', adminToken)
         .query({ format: 'json' })
-        .expect(HttpStatus.OK);
+        .expect(HttpStatus.ACCEPTED);
 
       expect(response.body.dataType).toBe('all');
       expect(response.body.sections).toBeDefined();
@@ -710,7 +710,7 @@ describe('Statistics API (e2e)', () => {
         .get('/admin/statistics/export/users')
         .set('Authorization', adminToken)
         .query({ format: 'csv' })
-        .expect(HttpStatus.OK);
+        .expect(HttpStatus.ACCEPTED);
 
       expect(response.header['content-type']).toContain('text/csv');
       expect(response.text).toContain('section,totalUsers,totalTransactions');

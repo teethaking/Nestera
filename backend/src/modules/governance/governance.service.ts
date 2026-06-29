@@ -38,6 +38,11 @@ import { ProposalLifecycleService } from './governance-lifecycle.service';
 import { VotingPowerResponseDto } from './dto/voting-power-response.dto';
 import { TxStatus, TxType } from '../transactions/entities/transaction.entity';
 import { LedgerTransaction } from '../blockchain/entities/transaction.entity';
+import { AuditLogService } from '../../common/services/audit-log.service';
+import {
+  AuditAction,
+  AuditResourceType,
+} from '../../common/entities/audit-log.entity';
 
 /** Timelock duration in milliseconds (24 hours) */
 const TIMELOCK_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -74,11 +79,14 @@ export class GovernanceService {
     private readonly transactionRepo: Repository<LedgerTransaction>,
     @InjectRepository(Delegation)
     private readonly delegationRepo: Repository<Delegation>,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async createProposal(
     userId: string,
     dto: CreateProposalDto,
+    correlationId?: string,
+    requestId?: string,
   ): Promise<ProposalResponseDto> {
     const user = await this.userService.findById(userId);
     if (!user.publicKey) {
@@ -176,6 +184,23 @@ export class GovernanceService {
     });
 
     const savedProposal = await this.proposalRepo.save(proposal);
+
+    await this.auditLogService.log({
+      action: AuditAction.CREATE,
+      resourceType: AuditResourceType.GOVERNANCE,
+      actor: userId,
+      correlationId,
+      requestId,
+      resourceId: savedProposal.id,
+      description: `User created proposal "${savedProposal.title}" (type: ${savedProposal.type})`,
+      newValue: {
+        onChainId: savedProposal.onChainId,
+        title: savedProposal.title,
+        type: savedProposal.type,
+        category: savedProposal.category,
+      },
+      success: true,
+    });
 
     this.eventEmitter.emit('governance.proposal.created', {
       proposalId: savedProposal.id,
@@ -379,6 +404,8 @@ export class GovernanceService {
     userId: string,
     onChainId: number,
     direction: VoteDirection,
+    correlationId?: string,
+    requestId?: string,
   ): Promise<{ transactionHash: string }> {
     const user = await this.userService.findById(userId);
     if (!user.publicKey) {
@@ -406,9 +433,7 @@ export class GovernanceService {
     const voteDedupKey = `vote:${user.publicKey}:${proposal.id}`;
     const cachedDuplicate = await this.cacheStrategy.get<true>(voteDedupKey);
     if (cachedDuplicate) {
-      throw new ConflictException(
-        'You have already voted on this proposal',
-      );
+      throw new ConflictException('You have already voted on this proposal');
     }
 
     // ── Layer 2: authoritative DB read ────────────────────────────────────
@@ -424,9 +449,7 @@ export class GovernanceService {
         'vote',
         `proposal:${proposal.id}`,
       ]);
-      throw new ConflictException(
-        'You have already voted on this proposal',
-      );
+      throw new ConflictException('You have already voted on this proposal');
     }
 
     const votingPowerResult = await this.getUserVotingPower(userId);
@@ -476,6 +499,23 @@ export class GovernanceService {
       walletAddress: user.publicKey,
     });
 
+    await this.auditLogService.log({
+      action: AuditAction.VOTE,
+      resourceType: AuditResourceType.GOVERNANCE,
+      actor: userId,
+      correlationId,
+      requestId,
+      resourceId: String(proposal.onChainId),
+      description: `User voted ${direction} on proposal ${proposal.id} (onChainId: ${proposal.onChainId})`,
+      newValue: {
+        proposalId: proposal.id,
+        onChainId: proposal.onChainId,
+        direction,
+        weight,
+      },
+      success: true,
+    });
+
     return { transactionHash: mockTxHash };
   }
 
@@ -517,6 +557,8 @@ export class GovernanceService {
   async queueProposal(
     proposalId: string,
     userId: string,
+    correlationId?: string,
+    requestId?: string,
   ): Promise<ProposalResponseDto> {
     const proposal = await this.proposalRepo.findOneBy({ id: proposalId });
     if (!proposal)
@@ -540,6 +582,21 @@ export class GovernanceService {
       reason: `Queued by ${userId}; timelock ends ${timelockEndsAt.toISOString()}`,
     });
 
+    await this.auditLogService.log({
+      action: AuditAction.UPDATE,
+      resourceType: AuditResourceType.GOVERNANCE,
+      actor: userId,
+      correlationId,
+      requestId,
+      resourceId: proposal.id,
+      description: `Proposal ${proposal.onChainId} queued for execution (timelock ends ${proposal.timelockEndsAt?.toISOString()})`,
+      newValue: {
+        status: ProposalStatus.QUEUED,
+        timelockEndsAt: proposal.timelockEndsAt,
+      },
+      success: true,
+    });
+
     this.eventEmitter.emit('governance.proposal.queued', {
       proposalId: proposal.id,
     });
@@ -551,6 +608,8 @@ export class GovernanceService {
   async executeProposal(
     proposalId: string,
     userId: string,
+    correlationId?: string,
+    requestId?: string,
   ): Promise<ProposalResponseDto> {
     const proposal = await this.proposalRepo.findOneBy({ id: proposalId });
     if (!proposal)
@@ -578,6 +637,21 @@ export class GovernanceService {
       },
     );
 
+    await this.auditLogService.log({
+      action: AuditAction.UPDATE,
+      resourceType: AuditResourceType.GOVERNANCE,
+      actor: userId,
+      correlationId,
+      requestId,
+      resourceId: proposal.id,
+      description: `Proposal ${proposal.onChainId} executed`,
+      newValue: {
+        status: ProposalStatus.EXECUTED,
+        executedAt: proposal.executedAt,
+      },
+      success: true,
+    });
+
     this.eventEmitter.emit('governance.proposal.executed', {
       proposalId: proposal.id,
     });
@@ -590,6 +664,8 @@ export class GovernanceService {
     proposalId: string,
     userId: string,
     reason?: string,
+    correlationId?: string,
+    requestId?: string,
   ): Promise<ProposalResponseDto> {
     const proposal = await this.proposalRepo.findOneBy({ id: proposalId });
     if (!proposal)
@@ -609,6 +685,18 @@ export class GovernanceService {
       },
     );
 
+    await this.auditLogService.log({
+      action: AuditAction.UPDATE,
+      resourceType: AuditResourceType.GOVERNANCE,
+      actor: userId,
+      correlationId,
+      requestId,
+      resourceId: proposal.id,
+      description: `Proposal ${proposal.onChainId} cancelled${reason ? `: ${reason}` : ''}`,
+      newValue: { status: ProposalStatus.CANCELLED, reason },
+      success: true,
+    });
+
     this.eventEmitter.emit('governance.proposal.cancelled', {
       proposalId: proposal.id,
     });
@@ -622,11 +710,26 @@ export class GovernanceService {
   async finalizeVoting(
     proposalId: string,
     userId: string,
+    correlationId?: string,
+    requestId?: string,
   ): Promise<ProposalResponseDto> {
     const proposal = await this.lifecycleService.finalizeVoting(
       proposalId,
       userId,
     );
+
+    await this.auditLogService.log({
+      action: AuditAction.UPDATE,
+      resourceType: AuditResourceType.GOVERNANCE,
+      actor: userId,
+      correlationId,
+      requestId,
+      resourceId: proposal.id,
+      description: `Voting finalized for proposal ${proposal.onChainId} — status: ${proposal.status}`,
+      newValue: { status: proposal.status },
+      success: true,
+    });
+
     const currentLedger = await this.getCurrentLedger();
     return this.toProposalResponse(proposal, currentLedger);
   }

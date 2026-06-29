@@ -3,6 +3,8 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GovernanceService } from './governance.service';
+import { ProposalLifecycleService } from './governance-lifecycle.service';
+import { CacheStrategyService } from '../cache/cache-strategy.service';
 import { GovernanceProposal, ProposalStatus } from './entities/governance-proposal.entity';
 import { Vote } from './entities/vote.entity';
 import { Delegation } from './entities/delegation.entity';
@@ -71,6 +73,8 @@ describe('GovernanceService – lifecycle & delegation', () => {
         { provide: SavingsService, useValue: { getUserVaultBalance: jest.fn().mockResolvedValue(1_000_000_000) } },
         { provide: TransactionsService, useValue: {} },
         { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: ProposalLifecycleService, useValue: { assertValidVotingWindow: jest.fn(), verifyQuorumForQueue: jest.fn(), transitionTo: jest.fn(), finalizeVoting: jest.fn(), getTransitionHistory: jest.fn() } },
+        { provide: CacheStrategyService, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn(), wrap: jest.fn().mockImplementation((_k, fn) => fn()) } },
         { provide: getRepositoryToken(GovernanceProposal), useValue: proposalRepo },
         { provide: getRepositoryToken(Vote), useValue: voteRepo },
         { provide: getRepositoryToken(Delegation), useValue: delegationRepo },

@@ -1,5 +1,5 @@
 import { Processor, Process } from '@nestjs/bull';
-import { Job } from 'bull';
+import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { FeeRewardReconciliationService } from '../services/fee-reward-reconciliation.service';
 

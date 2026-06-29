@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CircuitBreakerService } from '../../common/circuit-breaker/circuit-breaker.service';
+
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -43,7 +44,59 @@ export class CircuitBreakerController {
     };
   }
 
+  @Get('dependency-failures')
+  @ApiOperation({
+    summary: 'Get dependency failure/circuit breaker summary',
+    description:
+      'Returns circuit breaker states and metrics intended for dependency failure monitoring UI',
+  })
+  dependencyFailures() {
+    const metrics = this.circuitBreakerService.getMetrics();
+
+    if (!metrics) {
+      return { items: [] };
+    }
+
+    const items = Array.from(metrics.entries()).map(([name, m]) => ({
+      name,
+      state: m.state,
+      failureRate: m.failureRate,
+      failureCount: m.failureCount,
+      successCount: m.successCount,
+      totalRequests: m.totalRequests,
+      lastFailureTime: m.lastFailureTime,
+      lastSuccessTime: m.lastSuccessTime,
+    }));
+
+    // Sort OPEN breakers first, then by failureRate desc
+    items.sort((a, b) => {
+      const aOpen = a.state === 'OPEN' ? 1 : 0;
+      const bOpen = b.state === 'OPEN' ? 1 : 0;
+      if (bOpen !== aOpen) return bOpen - aOpen;
+      return b.failureRate - a.failureRate;
+    });
+
+    return { items };
+  }
+
+  @Get('dependency-failures/:name')
+  @ApiOperation({
+    summary: 'Get dependency failure details by circuit breaker name',
+  })
+  dependencyFailuresByName(@Param('name') name: string) {
+    const metrics = this.circuitBreakerService.getMetrics(name);
+    if (!metrics) {
+      return { name, metrics: null };
+    }
+
+    return {
+      name,
+      metrics,
+    };
+  }
+
   @Post(':name/open')
+
   @ApiOperation({
     summary: 'Manually open a circuit breaker',
     description: 'Manually trip a circuit breaker to prevent requests',

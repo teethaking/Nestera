@@ -20,6 +20,7 @@ import { Transaction } from '../transactions/entities/transaction.entity';
 import { User } from '../user/entities/user.entity';
 import { SavingsService as BlockchainSavingsService } from '../blockchain/savings.service';
 import { WaitlistService } from './waitlist.service';
+import { TransactionStateMachineService } from '../../transactions/services/transaction-state-machine.service';
 
 const makeProduct = (overrides: Partial<SavingsProduct> = {}): SavingsProduct =>
   ({
@@ -86,6 +87,7 @@ describe('SavingsService – compareProducts', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SavingsService,
+        { provide: TransactionStateMachineService, useValue: { transition: jest.fn(), getState: jest.fn() } },
         {
           provide: getRepositoryToken(SavingsProduct),
           useValue: productRepository,

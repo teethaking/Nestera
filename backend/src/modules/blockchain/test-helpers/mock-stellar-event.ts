@@ -15,5 +15,5 @@ export const mockEvent = (
     value: { toXDR: () => 'AAAA' },
   } as unknown as rpc.Api.EventResponse;
 
-  return { ...base, ...overrides };
+  return { ...base, ...overrides } as rpc.Api.EventResponse;
 };

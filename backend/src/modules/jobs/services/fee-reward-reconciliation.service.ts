@@ -34,26 +34,23 @@ export class FeeRewardReconciliationService {
       const discrepancy = item.expectedAmount - item.actualAmount;
       const absDiscrepancy = Math.abs(discrepancy);
 
+      // Define safe bounds
+      const safeBound = 0.01;
+      const percentageBound = 0.001 * item.expectedAmount;
+      const maxAllowedDiscrepancy = Math.max(safeBound, percentageBound);
+
       if (absDiscrepancy > 0) {
         discrepancies++;
-
-        // Define safe bounds (e.g., small rounding errors within 0.01 or 0.1%)
-        const safeBound = 0.01; // adjust as needed
-        const percentageBound = 0.001 * item.expectedAmount;
-        const maxAllowedDiscrepancy = Math.max(safeBound, percentageBound);
-
         if (absDiscrepancy <= maxAllowedDiscrepancy) {
-          // Auto-correct within safe bounds
           await this.autoCorrect(item, discrepancy);
           corrected++;
         } else {
-          // Report discrepancy (e.g., create admin ticket, log alert)
           await this.reportDiscrepancy(item, discrepancy);
         }
       }
 
       // Save reconciliation record
-      const record = this.reconciliationRepo.create({
+      const record = Object.assign(this.reconciliationRepo.create(), {
         recordType: item.recordType,
         referenceId: item.referenceId,
         expectedAmount: item.expectedAmount,
@@ -61,7 +58,7 @@ export class FeeRewardReconciliationService {
         discrepancy: discrepancy,
         status: absDiscrepancy === 0 ? 'pending' : (absDiscrepancy <= maxAllowedDiscrepancy ? 'corrected' : 'discrepancy_reported'),
         autoCorrected: absDiscrepancy > 0 && absDiscrepancy <= maxAllowedDiscrepancy,
-        correctedAt: absDiscrepancy > 0 && absDiscrepancy <= maxAllowedDiscrepancy ? new Date() : null,
+        correctedAt: (absDiscrepancy > 0 && absDiscrepancy <= maxAllowedDiscrepancy ? new Date() : null) as unknown as Date,
         notes: `Discrepancy: ${discrepancy}. ${absDiscrepancy > maxAllowedDiscrepancy ? 'Reported for manual review.' : 'Auto-corrected.'}`,
       });
       await this.reconciliationRepo.save(record);

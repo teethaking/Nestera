@@ -29,7 +29,11 @@ export class GracefulShutdownService implements BeforeApplicationShutdown {
   private readonly logger = new Logger(GracefulShutdownService.name);
   private readonly activeSockets = new Set<Socket>();
   private readonly shutdownTimeoutMs = 30_000;
+
   private readonly backgroundWorkers: BackgroundWorker[] = [];
+  private readonly dataSource: DataSource;
+  private readonly cacheManager?: Cache;
+  private readonly schedulerRegistry?: SchedulerRegistry;
 
   private isShuttingDown = false;
   private schedulersStopped = false;
@@ -40,14 +44,22 @@ export class GracefulShutdownService implements BeforeApplicationShutdown {
   private shutdownPromise: Promise<number> | null = null;
 
   constructor(
-    private readonly dataSource: DataSource,
+    dataSource: DataSource,
     @Optional()
     @Inject(CACHE_MANAGER)
-    private readonly cacheManager?: Cache,
+    cacheManager?: Cache,
     @Optional()
-    private readonly schedulerRegistry?: SchedulerRegistry,
+    schedulerRegistry?: SchedulerRegistry,
   ) {
+    this.dataSource = dataSource;
+    this.cacheManager = cacheManager;
+    this.schedulerRegistry = schedulerRegistry;
     GracefulShutdownService.instance = this;
+  }
+
+  registerWorker(worker: BackgroundWorker): void {
+    this.backgroundWorkers.push(worker);
+    this.logger.log(`Registered background worker: ${worker.name}`);
   }
 
   static async runTrackedTask<T>(
@@ -57,35 +69,24 @@ export class GracefulShutdownService implements BeforeApplicationShutdown {
     if (!GracefulShutdownService.instance) {
       return Promise.resolve(task());
     }
-
     return GracefulShutdownService.instance.runBackgroundTask(taskName, task);
-  }
-
-  registerWorker(worker: BackgroundWorker): void {
-    this.backgroundWorkers.push(worker);
-    this.logger.log(`Registered background worker: ${worker.name}`);
   }
 
   registerHttpServer(server: Server): void {
     if (this.registeredHttpServer === server) {
       return;
     }
-
     this.registeredHttpServer = server;
     this.registeredHttpServer.on('connection', (socket: Socket) => {
       this.activeSockets.add(socket);
-      socket.once('close', () => {
-        this.activeSockets.delete(socket);
-      });
+      socket.once('close', () => this.activeSockets.delete(socket));
     });
   }
 
   incrementActiveRequests(): void {
-    if (this.isShuttingDown) {
-      return;
+    if (!this.isShuttingDown) {
+      this.activeRequests += 1;
     }
-
-    this.activeRequests += 1;
   }
 
   decrementActiveRequests(): void {
@@ -108,24 +109,10 @@ export class GracefulShutdownService implements BeforeApplicationShutdown {
     if (this.isShuttingDown) {
       return;
     }
-
     this.isShuttingDown = true;
     this.logger.warn(
       `Graceful shutdown initiated${signal ? ` by ${signal}` : ''}`,
     );
-  }
-
-  async onApplicationShutdown(signal?: string): Promise<void> {
-    this.beginShutdown(signal);
-    this.stopSchedulers();
-    await this.waitForDrain(25_000);
-    await this.stopBackgroundWorkers();
-    await this.closeCacheConnections();
-    await this.closeDatabaseConnections();
-  }
-
-  async beforeApplicationShutdown(signal?: string): Promise<void> {
-    await this.onApplicationShutdown(signal);
   }
 
   async shutdownApplication(
@@ -136,28 +123,43 @@ export class GracefulShutdownService implements BeforeApplicationShutdown {
     if (this.shutdownPromise) {
       return this.shutdownPromise;
     }
-
     this.beginShutdown(signal);
-
     this.shutdownPromise = (async () => {
       try {
         await this.closeHttpServer();
-        await this.beforeApplicationShutdown(signal);
         await closeApplication();
         await flushLogs?.();
         return 0;
       } catch (error) {
         const message =
-          error instanceof Error
-            ? (error.stack ?? error.message)
-            : String(error);
+          error instanceof Error ? (error.stack ?? error.message) : String(error);
         this.logger.error(`Graceful shutdown failed: ${message}`);
         await flushLogs?.();
         return 1;
       }
     })();
-
     return this.shutdownPromise;
+  }
+
+  async onApplicationShutdown(signal?: string): Promise<void> {
+    this.beginShutdown(signal);
+    this.stopSchedulers();
+    this.registeredHttpServer?.closeIdleConnections?.();
+
+    await this.waitForDrain(this.shutdownTimeoutMs - 5_000);
+    await this.stopBackgroundWorkers();
+    await this.closeCacheConnections();
+    await this.closeDatabaseConnections();
+  }
+
+  async beforeApplicationShutdown(signal?: string): Promise<void> {
+    this.beginShutdown(signal);
+    this.stopSchedulers();
+    this.registeredHttpServer?.closeIdleConnections?.();
+    await this.waitForDrain(this.shutdownTimeoutMs - 5_000);
+    await this.stopBackgroundWorkers();
+    await this.closeCacheConnections();
+    await this.closeDatabaseConnections();
   }
 
   private async runBackgroundTask<T>(
@@ -170,9 +172,7 @@ export class GracefulShutdownService implements BeforeApplicationShutdown {
       );
       return undefined;
     }
-
     this.activeBackgroundTasks += 1;
-
     try {
       return await task();
     } finally {
@@ -180,34 +180,80 @@ export class GracefulShutdownService implements BeforeApplicationShutdown {
     }
   }
 
+  private async closeHttpServer(): Promise<void> {
+    if (!this.registeredHttpServer) {
+      return;
+    }
+    if (this.closeServerPromise) {
+      return this.closeServerPromise;
+    }
+
+    const server = this.registeredHttpServer;
+    this.closeServerPromise = new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(forceCloseTimer);
+        resolve();
+      };
+      const forceCloseTimer = setTimeout(() => {
+        this.logger.warn(
+          'HTTP server drain timeout reached. Closing remaining sockets.',
+        );
+        server.closeAllConnections?.();
+        this.destroyOpenSockets();
+        finish();
+      }, this.shutdownTimeoutMs);
+
+      try {
+        server.close((error?: Error) => {
+          if (
+            error &&
+            (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING'
+          ) {
+            this.logger.error(
+              `Error while closing HTTP server: ${error.message}`,
+            );
+          }
+          finish();
+        });
+        server.closeIdleConnections?.();
+      } catch (error) {
+        if (
+          (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING'
+        ) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          this.logger.error(`Failed to stop HTTP server: ${message}`);
+        }
+        finish();
+      }
+    });
+    return this.closeServerPromise;
+  }
+
   private stopSchedulers(): void {
     if (!this.schedulerRegistry || this.schedulersStopped) {
       return;
     }
-
     this.schedulersStopped = true;
-
     for (const [name, job] of this.schedulerRegistry.getCronJobs()) {
       job.stop();
       this.logger.log(`Stopped cron job "${name}"`);
     }
-
     for (const name of this.schedulerRegistry.getIntervals()) {
       clearInterval(this.schedulerRegistry.getInterval(name));
       this.schedulerRegistry.deleteInterval(name);
-      this.logger.log(`Cleared interval "${name}"`);
     }
-
     for (const name of this.schedulerRegistry.getTimeouts()) {
       clearTimeout(this.schedulerRegistry.getTimeout(name));
       this.schedulerRegistry.deleteTimeout(name);
-      this.logger.log(`Cleared timeout "${name}"`);
     }
   }
 
   private async waitForDrain(timeoutMs: number): Promise<void> {
     const startedAt = Date.now();
-
     while (this.activeRequests > 0 || this.activeBackgroundTasks > 0) {
       const elapsedMs = Date.now() - startedAt;
       if (elapsedMs >= timeoutMs) {
@@ -216,70 +262,40 @@ export class GracefulShutdownService implements BeforeApplicationShutdown {
         );
         return;
       }
-
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
 
   private async stopBackgroundWorkers(): Promise<void> {
-    if (this.backgroundWorkers.length === 0) {
-      return;
-    }
-
-    await Promise.allSettled(
+    if (this.backgroundWorkers.length === 0) return;
+    this.logger.log(`Stopping ${this.backgroundWorkers.length} background worker(s)...`);
+    const results = await Promise.allSettled(
       this.backgroundWorkers.map(async (worker) => {
-        await worker.shutdown();
-        this.logger.log(`Background worker stopped: ${worker.name}`);
+        try {
+          await worker.shutdown();
+          this.logger.log(`Background worker stopped: ${worker.name}`);
+        } catch (error) {
+          this.logger.error(`Error stopping background worker ${worker.name}:`, error);
+          throw error;
+        }
       }),
     );
-  }
-
-  private async closeHttpServer(): Promise<void> {
-    if (!this.registeredHttpServer) {
-      return;
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (failed.length > 0) {
+      this.logger.warn(`${failed.length} background worker(s) failed to stop cleanly`);
     }
-
-    if (this.closeServerPromise) {
-      return this.closeServerPromise;
-    }
-
-    const server = this.registeredHttpServer;
-
-    this.closeServerPromise = new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        clearTimeout(forceCloseTimer);
-        resolve();
-      };
-
-      const forceCloseTimer = setTimeout(() => {
-        server.closeAllConnections?.();
-        this.destroyOpenSockets();
-        finish();
-      }, this.shutdownTimeoutMs);
-
-      try {
-        server.close(() => finish());
-        server.closeIdleConnections?.();
-      } catch {
-        finish();
-      }
-    });
-
-    return this.closeServerPromise;
   }
 
   private async closeDatabaseConnections(): Promise<void> {
     if (!this.dataSource?.isInitialized) {
       return;
     }
-
-    await this.dataSource.destroy();
+    try {
+      await this.dataSource.destroy();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error closing database connections: ${message}`);
+    }
   }
 
   private async closeCacheConnections(): Promise<void> {
@@ -289,15 +305,38 @@ export class GracefulShutdownService implements BeforeApplicationShutdown {
 
     const manager = this.cacheManager as Cache & {
       reset?: () => Promise<void>;
-      store?: { client?: { quit?: () => Promise<void> } };
+      store?: {
+        client?: {
+          quit?: () => Promise<void>;
+          disconnect?: () => Promise<void>;
+        };
+      };
+      stores?: Array<{
+        client?: {
+          quit?: () => Promise<void>;
+          disconnect?: () => Promise<void>;
+        };
+      }>;
     };
 
-    if (manager.reset) {
-      await manager.reset();
-      return;
+    try {
+      if (manager.reset) {
+        await manager.reset();
+        return;
+      }
+      const store = manager.store ?? manager.stores?.[0];
+      const client = store?.client;
+      if (client?.quit) {
+        await client.quit();
+        return;
+      }
+      if (client?.disconnect) {
+        await client.disconnect();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error closing cache connections: ${message}`);
     }
-
-    await manager.store?.client?.quit?.();
   }
 
   private destroyOpenSockets(): void {

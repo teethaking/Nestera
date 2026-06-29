@@ -187,7 +187,7 @@ describe('AdminSavingsService', () => {
         page: 1,
         limit: 10,
         skip: 0,
-      });
+      } as any);
       expect(result.meta.total).toBe(1);
       expect(result.data).toHaveLength(1);
     });

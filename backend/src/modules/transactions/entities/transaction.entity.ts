@@ -19,9 +19,14 @@ export enum TxType {
 }
 
 export enum TxStatus {
+  CREATED = 'CREATED',
+  PENDING_CONFIRMATION = 'PENDING_CONFIRMATION',
+  CONFIRMED = 'CONFIRMED',
   COMPLETED = 'COMPLETED',
   PENDING = 'PENDING',
   FAILED = 'FAILED',
+  REVERSED = 'REVERSED',
+  DISPUTED = 'DISPUTED',
 }
 
 export enum TransactionCategory {
@@ -61,7 +66,7 @@ export class Transaction extends BaseEntity {
   @Column({ type: 'varchar' })
   txHash?: string | null;
 
-  @Column({ type: 'enum', enum: TxStatus, default: TxStatus.COMPLETED })
+  @Column({ type: 'enum', enum: TxStatus, default: TxStatus.CREATED })
   status?: TxStatus;
 
   @Column({ type: 'varchar', nullable: true })

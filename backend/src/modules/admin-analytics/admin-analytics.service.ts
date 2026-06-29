@@ -1,4 +1,10 @@
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  HttpException,
+  HttpStatus,
+  Inject,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
@@ -50,6 +56,7 @@ export class AdminAnalyticsService {
     private readonly transactionRepository: Repository<Transaction>,
     private readonly oracleService: OracleService,
     private readonly savingsService: SavingsService,
+    private readonly dataScopeService: DataScopeService,
   ) {}
 
   async getOverview(): Promise<AnalyticsOverviewDto> {
@@ -195,9 +202,12 @@ export class AdminAnalyticsService {
   }
 
   /**
-   * Calculate date range from filter
+   * Calculate date range from filter with role-based scoping
    */
-  private calculateDateRange(filter: DateRangeFilterDto): {
+  private calculateDateRange(
+    filter: DateRangeFilterDto,
+    role: Role = Role.ADMIN,
+  ): {
     fromDate: Date;
     toDate: Date;
   } {
@@ -207,22 +217,29 @@ export class AdminAnalyticsService {
     if (filter.fromDate) {
       fromDate = new Date(filter.fromDate);
     } else {
+      let rangeDays = 30;
       switch (filter.range) {
         case DateRange.LAST_7_DAYS:
-          fromDate = new Date(toDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+          rangeDays = 7;
           break;
         case DateRange.LAST_30_DAYS:
-          fromDate = new Date(toDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+          rangeDays = 30;
           break;
         case DateRange.LAST_90_DAYS:
-          fromDate = new Date(toDate.getTime() - 90 * 24 * 60 * 60 * 1000);
+          rangeDays = 90;
           break;
         case DateRange.LAST_365_DAYS:
-          fromDate = new Date(toDate.getTime() - 365 * 24 * 60 * 60 * 1000);
+          rangeDays = 365;
           break;
         default:
-          fromDate = new Date(toDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+          rangeDays = 30;
       }
+
+      // Apply role-based time range restriction
+      const maxRange = this.dataScopeService.getMaxTimeRange(role);
+      rangeDays = Math.min(rangeDays, maxRange);
+
+      fromDate = new Date(toDate.getTime() - rangeDays * 24 * 60 * 60 * 1000);
     }
 
     return { fromDate, toDate };
@@ -321,9 +338,12 @@ export class AdminAnalyticsService {
   }
 
   /**
-   * Get user analytics - growth, retention, churn metrics
+   * Get user analytics - growth, retention, churn metrics with role-based scoping
    */
-  async getUserAnalytics(filter: DateRangeFilterDto): Promise<{
+  async getUserAnalytics(
+    filter: DateRangeFilterDto,
+    role: Role = Role.ADMIN,
+  ): Promise<{
     totalUsers: number;
     newUsers: number;
     activeUsers: number;
@@ -335,7 +355,7 @@ export class AdminAnalyticsService {
     usersByKycStatus: Record<string, number>;
     userGrowthTrend: { date: string; count: number }[];
   }> {
-    const { fromDate, toDate } = this.calculateDateRange(filter);
+    const { fromDate, toDate } = this.calculateDateRange(filter, role);
 
     const [
       totalUsers,
@@ -434,16 +454,19 @@ export class AdminAnalyticsService {
   }
 
   /**
-   * Get revenue analytics - fees, projections
+   * Get revenue analytics - fees, projections with role-based scoping
    */
-  async getRevenueAnalytics(filter: DateRangeFilterDto): Promise<{
+  async getRevenueAnalytics(
+    filter: DateRangeFilterDto,
+    role: Role = Role.ADMIN,
+  ): Promise<{
     totalRevenue: number;
     monthlyRevenue: number;
     revenueByType: Record<string, number>;
     revenueTrend: { date: string; amount: number }[];
     revenueProjection: { month: string; projected: number }[];
   }> {
-    const { fromDate, toDate } = this.calculateDateRange(filter);
+    const { fromDate, toDate } = this.calculateDateRange(filter, role);
 
     // Get revenue from completed transactions (assuming 1% fee)
     const revenueData = await this.transactionRepository
@@ -523,9 +546,12 @@ export class AdminAnalyticsService {
   }
 
   /**
-   * Get savings analytics - TVL, APY, product performance
+   * Get savings analytics - TVL, APY, product performance with role-based scoping
    */
-  async getSavingsAnalytics(filter: DateRangeFilterDto): Promise<{
+  async getSavingsAnalytics(
+    filter: DateRangeFilterDto,
+    role: Role = Role.ADMIN,
+  ): Promise<{
     totalValueLocked: number;
     avgSavingsPerUser: number;
     totalSubscriptions: number;
@@ -540,7 +566,7 @@ export class AdminAnalyticsService {
     apyDistribution: { range: string; count: number }[];
     savingsGrowthTrend: { date: string; tvl: number }[];
   }> {
-    const { fromDate, toDate } = this.calculateDateRange(filter);
+    const { fromDate, toDate } = this.calculateDateRange(filter, role);
 
     // Get total TVL
     const totalValueLocked = await this.getTotalValueLocked();
@@ -633,10 +659,13 @@ export class AdminAnalyticsService {
   }
 
   /**
-   * Get transaction analytics - volume trends
+   * Get transaction analytics - volume trends with role-based scoping
    */
 
-  async getTransactionAnalytics(filter: DateRangeFilterDto): Promise<{
+  async getTransactionAnalytics(
+    filter: DateRangeFilterDto,
+    role: Role = Role.ADMIN,
+  ): Promise<{
     totalTransactions: number;
     totalVolume: number;
     avgTransactionSize: number;
@@ -644,7 +673,7 @@ export class AdminAnalyticsService {
     transactionsByStatus: Record<string, number>;
     transactionTrend: { date: string; count: number; volume: number }[];
   }> {
-    const { fromDate, toDate } = this.calculateDateRange(filter);
+    const { fromDate, toDate } = this.calculateDateRange(filter, role);
 
     // Get transaction stats
     const [totalTransactions, volumeResult] = await Promise.all([

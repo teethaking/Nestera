@@ -17,6 +17,11 @@ import { User } from '../user/entities/user.entity';
 import { WaitlistEntry } from '../savings/entities/waitlist-entry.entity';
 import { WaitlistEvent } from '../savings/entities/waitlist-event.entity';
 import { Role } from '../../common/enums/role.enum';
+import {
+  decodeCursor,
+  encodeCursor,
+} from '../../common/helpers/cursor-pagination.helper';
+import { NotificationIdempotencyService } from './notification-idempotency.service';
 
 export interface SweepCompletedEvent {
   userId: string;
@@ -84,6 +89,7 @@ export class NotificationsService {
     private readonly waitlistEventRepository: Repository<WaitlistEvent>,
     private readonly mailService: MailService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly idempotencyService: NotificationIdempotencyService,
   ) {}
 
   /**
@@ -652,16 +658,75 @@ export class NotificationsService {
     userId: string,
     pageOptionsDto: PageOptionsDto,
   ): Promise<PageDto<Notification>> {
-    const [notifications, totalItemCount] =
-      await this.notificationRepository.findAndCount({
-        where: { userId },
-        order: { createdAt: 'DESC' },
-        skip: pageOptionsDto.skip,
-        take: pageOptionsDto.limit,
-      });
+    const pageSize = pageOptionsDto.pageSize;
 
-    const meta = new PageMetaDto({ pageOptionsDto, totalItemCount });
-    return new PageDto(notifications, meta);
+    if (pageOptionsDto.cursor) {
+      const cursor = decodeCursor(pageOptionsDto.cursor);
+      const query = this.notificationRepository
+        .createQueryBuilder('n')
+        .where('n.userId = :userId', { userId })
+        .andWhere(
+          '(n.createdAt < :cursorCreatedAt OR (n.createdAt = :cursorCreatedAt AND n.id < :cursorId))',
+          {
+            cursorCreatedAt: new Date(cursor.createdAt),
+            cursorId: cursor.id,
+          },
+        )
+        .orderBy('n.createdAt', 'DESC')
+        .addOrderBy('n.id', 'DESC')
+        .take(pageSize + 1);
+
+      const rows = await query.getMany();
+      const hasMore = rows.length > pageSize;
+      const notifications = hasMore ? rows.slice(0, pageSize) : rows;
+      const nextCursor =
+        hasMore && notifications.length > 0
+          ? encodeCursor({
+              createdAt:
+                notifications[notifications.length - 1].createdAt.toISOString(),
+              id: notifications[notifications.length - 1].id,
+            })
+          : null;
+      const totalItemCount = pageOptionsDto.shouldIncludeTotal
+        ? await this.notificationRepository.count({
+            where: { userId },
+          })
+        : undefined;
+
+      return new PageDto(
+        notifications,
+        new PageMetaDto({ pageOptionsDto, totalItemCount, nextCursor }),
+      );
+    }
+
+    const rows = await this.notificationRepository
+      .createQueryBuilder('n')
+      .where('n.userId = :userId', { userId })
+      .orderBy('n.createdAt', 'DESC')
+      .addOrderBy('n.id', 'DESC')
+      .skip(pageOptionsDto.skip)
+      .take(pageSize + 1)
+      .getMany();
+    const hasMore = rows.length > pageSize;
+    const notifications = hasMore ? rows.slice(0, pageSize) : rows;
+    const nextCursor =
+      hasMore && notifications.length > 0
+        ? encodeCursor({
+            createdAt:
+              notifications[notifications.length - 1].createdAt.toISOString(),
+            id: notifications[notifications.length - 1].id,
+          })
+        : null;
+    const totalItemCount = pageOptionsDto.shouldIncludeTotal
+      ? await this.notificationRepository.count({
+          where: { userId },
+        })
+      : undefined;
+
+    return new PageDto(
+      notifications,
+      new PageMetaDto({ pageOptionsDto, totalItemCount, nextCursor }),
+    );
   }
 
   /**
@@ -879,17 +944,40 @@ export class NotificationsService {
     title: string;
     message: string;
     metadata?: Record<string, any>;
+    eventId?: string;
   }) {
+    const eventId = data.eventId || `${data.type}-${Date.now()}`;
+    
+    // Check idempotency to prevent duplicate dispatches
+    const existingRecord = await this.idempotencyService.checkAndLock(
+      data.userId,
+      data.type,
+      eventId,
+    );
+
+    if (existingRecord && existingRecord.dispatched) {
+      this.logger.debug(
+        `Skipping duplicate notification dispatch: ${data.type} for user ${data.userId}, event ${eventId}`,
+      );
+      return;
+    }
+
     const preferences = await this.getOrCreatePreferences(data.userId);
     const user = await this.userRepository.findOne({
       where: { id: data.userId },
     });
 
-    if (!user) return;
+    if (!user) {
+      await this.idempotencyService.markAsDispatched(data.userId, data.type, eventId);
+      return;
+    }
+
+    let notificationId: string | undefined;
 
     // 1. Always create In-App notification if enabled
     if (preferences.inAppNotifications) {
-      await this.createNotification(data);
+      const notification = await this.createNotification(data);
+      notificationId = notification.id;
     }
 
     // 2. Handle Email based on Digest Frequency
@@ -915,6 +1003,14 @@ export class NotificationsService {
         );
       }
     }
+
+    // Mark as dispatched
+    await this.idempotencyService.markAsDispatched(
+      data.userId,
+      data.type,
+      eventId,
+      notificationId,
+    );
   }
 
   /**

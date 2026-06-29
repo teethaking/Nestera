@@ -169,7 +169,7 @@ export default () => ({
       .split(',')
       .map((h) => h.trim())
       .filter(Boolean),
-    credentials: process.env.CORS_CREDENTIALS !== 'false',
+    credentials: process.env.CORS_CREDENTIALS === 'true',
     maxAge: parseInt(process.env.CORS_MAX_AGE || '86400', 10),
   },
   balanceSync: {

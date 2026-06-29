@@ -11,6 +11,12 @@ import {
   BulkActionDto,
 } from './dto/admin-user.dto';
 import { MailService } from '../mail/mail.service';
+import { PageDto } from '../../common/dto/page.dto';
+import { PageMetaDto } from '../../common/dto/page-meta.dto';
+import {
+  decodeCursor,
+  encodeCursor,
+} from '../../common/helpers/cursor-pagination.helper';
 
 @Injectable()
 export class AdminUsersService {
@@ -24,22 +30,43 @@ export class AdminUsersService {
     private readonly mail: MailService,
   ) {}
 
-  async listUsers(query: AdminUsersQueryDto): Promise<{
-    data: AdminUserListItemDto[];
-    meta: { total: number; page: number; limit: number };
-  }> {
+  async listUsers(query: AdminUsersQueryDto): Promise<PageDto<AdminUserListItemDto>> {
     const qb = this.buildBaseQuery(query);
+    const pageSize = query.pageSize;
 
-    const [users, total] = await qb
-      .skip(query.skip)
-      .take(query.limit ?? 20)
-      .getManyAndCount();
+    if (query.cursor) {
+      const cursor = decodeCursor(query.cursor);
+      qb.andWhere(
+        '(u.createdAt < :cursorCreatedAt OR (u.createdAt = :cursorCreatedAt AND u.id < :cursorId))',
+        {
+          cursorCreatedAt: new Date(cursor.createdAt),
+          cursorId: cursor.id,
+        },
+      );
+    } else {
+      qb.skip(query.skip);
+    }
 
-    const data = await Promise.all(users.map((u) => this.toListItem(u)));
-    return {
+    const users = await qb.take(pageSize + 1).getMany();
+    const hasMore = users.length > pageSize;
+    const rows = hasMore ? users.slice(0, pageSize) : users;
+
+    const data = await Promise.all(rows.map((u) => this.toListItem(u)));
+    const nextCursor =
+      hasMore && rows.length > 0
+        ? encodeCursor({
+            createdAt: rows[rows.length - 1].createdAt.toISOString(),
+            id: rows[rows.length - 1].id,
+          })
+        : null;
+    const totalItemCount = query.shouldIncludeTotal
+      ? await this.buildBaseQuery(query).getCount()
+      : undefined;
+
+    return new PageDto(
       data,
-      meta: { total, page: query.page ?? 1, limit: query.limit ?? 20 },
-    };
+      new PageMetaDto({ pageOptionsDto: query, totalItemCount, nextCursor }),
+    );
   }
 
   async getUserDetails(id: string): Promise<AdminUserDetailDto> {
@@ -139,6 +166,7 @@ export class AdminUsersService {
     const qb = this.users
       .createQueryBuilder('u')
       .orderBy('u.createdAt', 'DESC');
+    qb.addOrderBy('u.id', 'DESC');
 
     if (query.search) {
       qb.andWhere('(u.email ILIKE :s OR u.name ILIKE :s)', {

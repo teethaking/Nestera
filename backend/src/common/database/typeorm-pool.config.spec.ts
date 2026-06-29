@@ -22,8 +22,8 @@ describe('typeorm-pool.config', () => {
 
       const options = getPoolExtraOptions(configService);
 
-      expect(options.max).toBe(30);
-      expect(options.min).toBe(5);
+      expect(options.max).toBe(50);
+      expect(options.min).toBe(10);
       expect(options.idleTimeoutMillis).toBe(30000);
       expect(options.connectionTimeoutMillis).toBe(2000);
     });
@@ -86,8 +86,8 @@ describe('typeorm-pool.config', () => {
         password: 'secret',
         synchronize: false,
         extra: expect.objectContaining({
-          max: 30,
-          min: 5,
+          max: 50,
+          min: 10,
         }),
       });
     });

@@ -147,6 +147,54 @@ GROUP BY error_message
 ORDER BY count DESC;
 ```
 
+### 6. User Action Audit Events
+
+User-initiated actions are logged with specific action types and resource types for auditability:
+
+| Action | Resource Type | Description |
+|--------|---------------|-------------|
+| `DEPOSIT` | `SAVINGS` | User subscribes to a savings product (initiates a deposit) |
+| `WITHDRAW` | `WITHDRAWAL_REQUEST` | User requests a withdrawal from a subscription |
+| `CREATE` | `DISPUTE` | User submits a new dispute on a claim |
+| `VOTE` | `GOVERNANCE` | User casts a vote (for/against/abstain) on a governance proposal |
+
+These entries include `correlationId`, `actor` (user ID), `resourceId`, and `description` for full traceability.
+
+```sql
+-- Find all deposit actions by a user
+SELECT
+  correlation_id,
+  timestamp,
+  description,
+  new_value
+FROM audit_logs
+WHERE action = 'DEPOSIT'
+  AND actor = 'user-uuid'
+ORDER BY timestamp DESC;
+
+-- Find all withdrawal requests
+SELECT
+  correlation_id,
+  timestamp,
+  description,
+  new_value
+FROM audit_logs
+WHERE action = 'WITHDRAW'
+  AND actor = 'user-uuid'
+ORDER BY timestamp DESC;
+
+-- Find all votes by a user
+SELECT
+  correlation_id,
+  timestamp,
+  description,
+  new_value
+FROM audit_logs
+WHERE action = 'VOTE'
+  AND actor = 'user-uuid'
+ORDER BY timestamp DESC;
+```
+
 ## Common Incident Scenarios
 
 ### Scenario 1: Claim Status Changed Unexpectedly
@@ -379,7 +427,11 @@ HAVING COUNT(*) > 3;
 
 ## Retention Policy
 
-- **Audit Logs**: Retained for 90 days (configurable)
+- **Audit Logs**: Retained for 90 days (configurable via `audit.retentionDays` env var). This applies to all entries in the `audit_logs` table, covering both admin actions and user actions (deposits, withdrawals, disputes, votes, etc.).
+  - A scheduled cron job (`AdminAuditLogsArchivalService`) runs daily at 01:00 UTC to archive and purge logs older than the retention window.
+  - Archived logs are compressed (gzip) and optionally uploaded to S3 Glacier for cold storage.
+  - The archive includes all audit fields: correlationId, actor, action, resourceType, resourceId, description, previous/new values, IP address, and user agent.
+  - User action audit entries are retained under the same policy as admin audit entries.
 - **Application Logs**: Retained for 30 days
 - **Contract Events**: Retained indefinitely (immutable on blockchain)
 

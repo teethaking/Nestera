@@ -402,6 +402,7 @@ const envValidationSchema = Joi.object({
     {
       provide: APP_INTERCEPTOR,
       useClass: AdminConfirmationInterceptor,
+      useClass: MetricsInterceptor,
     },
     {
       provide: APP_INTERCEPTOR,

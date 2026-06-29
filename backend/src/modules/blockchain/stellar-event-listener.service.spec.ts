@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { DistributedLockService } from '../../../common/distributed-lock/distributed-lock.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { StellarEventListenerService } from './stellar-event-listener.service';

@@ -15,12 +15,12 @@ export async function paginate<T extends ObjectLiteral>(
   queryBuilder: SelectQueryBuilder<T>,
   pageOptionsDto: PageOptionsDto,
 ): Promise<PageDto<T>> {
-  const { skip, limit, order } = pageOptionsDto;
+  const { skip, order, pageSize } = pageOptionsDto;
 
   queryBuilder
     .orderBy(`${queryBuilder.alias}.createdAt`, order)
     .skip(skip)
-    .take(limit);
+    .take(pageSize);
 
   const [data, totalItemCount] = await queryBuilder.getManyAndCount();
 
@@ -43,6 +43,6 @@ export function getSkipTake(pageOptionsDto: PageOptionsDto): {
 } {
   return {
     skip: pageOptionsDto.skip,
-    take: pageOptionsDto.limit ?? 10,
+    take: pageOptionsDto.pageSize,
   };
 }

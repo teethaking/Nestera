@@ -9,8 +9,8 @@ import { LogSanitizerService } from './services/log-sanitizer.service';
 import { CompressionMetricsService } from './services/compression-metrics.service';
 import { CompressionMetricsMiddleware } from './middleware/compression.middleware';
 import { AuditLogService } from './services/audit-log.service';
+import { ContractCompatibilityService } from './services/contract-compatibility.service';
 import { CacheModule } from '../modules/cache/cache.module';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditLog } from './entities/audit-log.entity';
 import { DistributedLockModule } from './distributed-lock/distributed-lock.module';
 
@@ -27,6 +27,7 @@ import { DistributedLockModule } from './distributed-lock/distributed-lock.modul
     CompressionMetricsService,
     CompressionMetricsMiddleware,
     AuditLogService,
+    ContractCompatibilityService,
   ],
   exports: [
     RateLimitMonitorService,
@@ -36,6 +37,7 @@ import { DistributedLockModule } from './distributed-lock/distributed-lock.modul
     LogSanitizerService,
     CompressionMetricsService,
     AuditLogService,
+    ContractCompatibilityService,
     DistributedLockModule,
   ],
 })

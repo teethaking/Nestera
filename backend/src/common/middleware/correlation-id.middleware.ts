@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export type RequestWithCorrelation = Request & {
   correlationId: string;
+  requestId: string;
   startTime: number;
 };
 
@@ -22,15 +23,15 @@ export type RequestWithCorrelation = Request & {
 @Injectable()
 export class CorrelationIdMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction) {
-    // Accept from either casing — normalize to lowercase internally
-    const incomingId =
-      (req.headers['x-correlation-id'] as string) ||
-      (req.headers['x-request-id'] as string);
-
-    const correlationId = incomingId || uuidv4();
-
-    // Attach to request for downstream access
     const reqWithCorrelation = req as RequestWithCorrelation;
+
+    // Extract requestId from X-Request-ID header, or generate a unique UUID
+    const requestId = (req.headers['x-request-id'] as string) || uuidv4();
+    reqWithCorrelation.requestId = requestId;
+
+    // Extract correlationId from X-Correlation-ID header, default to requestId
+    const correlationId =
+      (req.headers['x-correlation-id'] as string) || requestId;
     reqWithCorrelation.correlationId = correlationId;
     reqWithCorrelation.startTime = Date.now();
 

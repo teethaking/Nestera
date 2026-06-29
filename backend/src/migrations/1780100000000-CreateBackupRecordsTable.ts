@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class CreateBackupRecordsTable1780100000000 implements MigrationInterface {
-  async up(queryRunner: QueryRunner): Promise<void> {
+  public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TYPE backup_status_enum AS ENUM (
         'success', 'failed', 'restore_test_passed', 'restore_test_failed'
@@ -24,7 +24,7 @@ export class CreateBackupRecordsTable1780100000000 implements MigrationInterface
     `);
   }
 
-  async down(queryRunner: QueryRunner): Promise<void> {
+  public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       DROP TABLE IF EXISTS backup_records;
       DROP TYPE IF EXISTS backup_status_enum;

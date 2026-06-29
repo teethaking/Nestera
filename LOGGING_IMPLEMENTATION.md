@@ -371,6 +371,66 @@ NODE_ENV=production npm start
 - Check environment variables (API keys, region, etc.)
 - Test with `console.log` to ensure stdout is captured
 
+## Audit Log Database Retention Policy
+
+The audit log entries stored in the database (`audit_logs` table) are subject to a configurable retention policy separate from the Pino log transport layer above.
+
+### Retention Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `audit.retentionDays` | `90` | How long (in days) audit log rows are kept in the primary database |
+
+Configured via environment or config:
+```bash
+# .env
+AUDIT_RETENTION_DAYS=90
+```
+
+### Cleanup
+
+The `AdminAuditLogsService.cleanupOldLogs()` method deletes rows older than `retentionDays`:
+- Called on-demand via `POST /admin/audit-logs/cleanup`
+- Deletes all rows where `timestamp < NOW() - retentionDays`
+- Returns the count of deleted rows
+
+### Archival (Automated)
+
+The `AdminAuditLogsArchivalService` runs daily at **01:00 UTC** via a `@Cron('0 1 * * *')` scheduled task:
+
+1. **Batch read** — fetches logs older than retention in batches of 10,000 (configurable via `audit.archivalBatchSize`)
+2. **Local file** — writes each batch to a JSONL file (`audit-logs-{timestamp}.jsonl`)
+3. **Compression** — gzips the file (enabled by default via `audit.compression.enabled`)
+4. **Cold storage** — uploads to S3 Glacier when `audit.coldStorage.enabled` is true (requires `audit.coldStorage.s3Bucket`, `awsAccessKeyId`, `awsSecretAccessKey`)
+5. **Deletion** — removes the archived rows from the primary database
+
+### Cold Storage Configuration
+
+```bash
+AUDIT_COLD_STORAGE_ENABLED=true
+AUDIT_COLD_STORAGE_S3_BUCKET=nestera-audit-logs
+AUDIT_COLD_STORAGE_REGION=us-east-1
+AUDIT_COLD_STORAGE_AWS_ACCESS_KEY_ID=...
+AUDIT_COLD_STORAGE_AWS_SECRET_ACCESS_KEY=...
+AUDIT_COMPRESSION_ENABLED=true
+AUDIT_ARCHIVE_PATH=/var/archive/audit-logs
+AUDIT_ARCHIVAL_BATCH_SIZE=10000
+```
+
+### Verification
+
+Query retention policy status:
+```bash
+GET /admin/audit-logs/retention-policy
+# → { "retentionDays": 90, "configured": true }
+```
+
+Query archival statistics:
+```bash
+GET /admin/audit-logs/stats
+# → { totalLogsInDb, logsOlderThanRetention, retentionDays, estimatedStorageGb }
+```
+
 ## Future Enhancements
 
 - Add request/response size tracking

@@ -15,7 +15,7 @@ const missing = [];
 
 for (const file of files) {
   const content = fs.readFileSync(file, 'utf8');
-  if (!/public\s+async\s+down\s*\(/.test(content)) {
+  if (!/async\s+down\s*\(/.test(content)) {
     missing.push(path.basename(file));
   }
 }

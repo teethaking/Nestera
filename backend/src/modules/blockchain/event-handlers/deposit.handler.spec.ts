@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
+import { TransactionStateMachineService } from '../../../transactions/services/transaction-state-machine.service';
 import { xdr, nativeToScVal } from '@stellar/stellar-sdk';
 import { createHash } from 'crypto';
 import { DepositHandler } from './deposit.handler';

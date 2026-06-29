@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Referral } from './entities/referral.entity';
 import { ReferralCampaign } from './entities/referral-campaign.entity';
 import { ReferralFraudAudit } from './entities/referral-fraud-audit.entity';
+import { ProcessedReferralEvent } from './entities/processed-referral-event.entity';
 import { User } from '../user/entities/user.entity';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { Notification } from '../notifications/entities/notification.entity';
@@ -22,6 +23,7 @@ import { ReferralEventsListener } from './referral-events.listener';
       Referral,
       ReferralCampaign,
       ReferralFraudAudit,
+      ProcessedReferralEvent,
       User,
       Transaction,
       Notification,

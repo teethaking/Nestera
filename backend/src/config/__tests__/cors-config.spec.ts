@@ -37,7 +37,7 @@ describe('CORS Configuration', () => {
       'Authorization',
       'Accept',
     ]);
-    expect(config.cors.credentials).toBe(true);
+    expect(config.cors.credentials).toBe(false);
     expect(config.cors.maxAge).toBe(86400);
   });
 

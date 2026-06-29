@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue, JobsOptions } from 'bullmq';
-import { QUEUE_NAMES, JOB_NAMES, DLQ_SUFFIX } from './job-queue.constants';
+import { QUEUE_NAMES, JOB_NAMES } from './job-queue.constants';
 
 export interface NotificationJobData {
   userId: string;
@@ -31,6 +31,15 @@ export interface ReportJobData {
   params: Record<string, any>;
 }
 
+export interface DisputeEvidenceJobData {
+  evidenceId: string;
+  disputeId: string;
+  storagePath: string;
+  mimeType: string;
+  originalFilename: string;
+  uploadedBy: string;
+}
+
 @Injectable()
 export class JobQueueService {
   private readonly logger = new Logger(JobQueueService.name);
@@ -44,6 +53,8 @@ export class JobQueueService {
     private readonly blockchainQueue: Queue,
     @InjectQueue(QUEUE_NAMES.REPORTS)
     private readonly reportQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.DISPUTE_EVIDENCE)
+    private readonly disputeEvidenceQueue: Queue,
   ) {}
 
   async addNotificationJob(data: NotificationJobData, opts?: JobsOptions) {
@@ -86,6 +97,28 @@ export class JobQueueService {
       opts,
     );
     this.logger.debug(`Queued report job ${job.id} type=${data.reportType}`);
+    return job;
+  }
+
+  async addEvidenceProcessingJob(
+    data: DisputeEvidenceJobData,
+    opts?: JobsOptions,
+  ) {
+    const job = await this.disputeEvidenceQueue.add(
+      JOB_NAMES.PROCESS_DISPUTE_EVIDENCE,
+      data,
+      {
+        ...opts,
+        jobId: `evidence-${data.evidenceId}`,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 3000 },
+        removeOnComplete: { count: 200 },
+        removeOnFail: { count: 500 },
+      },
+    );
+    this.logger.debug(
+      `Queued evidence processing job ${job.id} for evidenceId=${data.evidenceId} disputeId=${data.disputeId}`,
+    );
     return job;
   }
 
@@ -135,6 +168,7 @@ export class JobQueueService {
       [QUEUE_NAMES.EMAIL]: this.emailQueue,
       [QUEUE_NAMES.BLOCKCHAIN]: this.blockchainQueue,
       [QUEUE_NAMES.REPORTS]: this.reportQueue,
+      [QUEUE_NAMES.DISPUTE_EVIDENCE]: this.disputeEvidenceQueue,
     };
     return map[queueName] || null;
   }

@@ -21,6 +21,8 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CorrelationId } from '../../common/decorators/correlation-id.decorator';
+import { RequestId } from '../../common/decorators/request-id.decorator';
 import { CreateProposalDto } from './dto/create-proposal.dto';
 import { EditProposalDto } from './dto/edit-proposal.dto';
 import { CastVoteDto } from './dto/cast-vote.dto';
@@ -54,8 +56,15 @@ export class GovernanceProposalsController {
   createProposal(
     @CurrentUser() user: { id: string },
     @Body() dto: CreateProposalDto,
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<ProposalResponseDto> {
-    return this.governanceService.createProposal(user.id, dto);
+    return this.governanceService.createProposal(
+      user.id,
+      dto,
+      correlationId,
+      requestId,
+    );
   }
 
   @Post(':id/edit')
@@ -172,8 +181,16 @@ export class GovernanceProposalsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() castVoteDto: CastVoteDto,
     @CurrentUser() user: { id: string },
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<{ transactionHash: string }> {
-    return this.governanceService.castVote(user.id, id, castVoteDto.direction);
+    return this.governanceService.castVote(
+      user.id,
+      id,
+      castVoteDto.direction,
+      correlationId,
+      requestId,
+    );
   }
 
   @Get(':id/votes')
@@ -246,8 +263,15 @@ export class GovernanceProposalsController {
   queueProposal(
     @Param('id') id: string,
     @CurrentUser() user: { id: string },
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<ProposalResponseDto> {
-    return this.governanceService.queueProposal(id, user.id);
+    return this.governanceService.queueProposal(
+      id,
+      user.id,
+      correlationId,
+      requestId,
+    );
   }
 
   @Post(':id/execute')
@@ -269,8 +293,15 @@ export class GovernanceProposalsController {
   executeProposal(
     @Param('id') id: string,
     @CurrentUser() user: { id: string },
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<ProposalResponseDto> {
-    return this.governanceService.executeProposal(id, user.id);
+    return this.governanceService.executeProposal(
+      id,
+      user.id,
+      correlationId,
+      requestId,
+    );
   }
 
   @Post(':id/cancel')
@@ -289,8 +320,16 @@ export class GovernanceProposalsController {
     @Param('id') id: string,
     @CurrentUser() user: { id: string },
     @Body('reason') reason?: string,
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<ProposalResponseDto> {
-    return this.governanceService.cancelProposal(id, user.id, reason);
+    return this.governanceService.cancelProposal(
+      id,
+      user.id,
+      reason,
+      correlationId,
+      requestId,
+    );
   }
 
   @Post(':id/finalize')
@@ -317,8 +356,15 @@ export class GovernanceProposalsController {
   finalizeProposal(
     @Param('id') id: string,
     @CurrentUser() user: { id: string },
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<ProposalResponseDto> {
-    return this.governanceService.finalizeVoting(id, user.id);
+    return this.governanceService.finalizeVoting(
+      id,
+      user.id,
+      correlationId,
+      requestId,
+    );
   }
 
   @Get(':id/transitions')
@@ -338,12 +384,12 @@ export class GovernanceProposalsController {
       items: {
         type: 'object',
         properties: {
-          id:            { type: 'string', format: 'uuid' },
-          fromStatus:    { type: 'string' },
-          toStatus:      { type: 'string' },
-          triggeredBy:   { type: 'string', nullable: true },
-          reason:        { type: 'string', nullable: true },
-          metadata:      { type: 'object', nullable: true },
+          id: { type: 'string', format: 'uuid' },
+          fromStatus: { type: 'string' },
+          toStatus: { type: 'string' },
+          triggeredBy: { type: 'string', nullable: true },
+          reason: { type: 'string', nullable: true },
+          metadata: { type: 'object', nullable: true },
           transitionedAt: { type: 'string', format: 'date-time' },
         },
       },

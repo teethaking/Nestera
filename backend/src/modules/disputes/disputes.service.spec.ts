@@ -9,6 +9,7 @@ import {
 } from './entities/dispute.entity';
 import { MedicalClaim } from '../claims/entities/medical-claim.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AuditLogService } from '../../common/services/audit-log.service';
 import { BadRequestException } from '@nestjs/common';
 
 describe('DisputesService', () => {
@@ -62,6 +63,10 @@ describe('DisputesService', () => {
         {
           provide: NotificationsService,
           useValue: mockNotificationsService,
+        },
+        {
+          provide: AuditLogService,
+          useValue: { log: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();

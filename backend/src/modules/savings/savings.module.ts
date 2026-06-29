@@ -45,11 +45,13 @@ import { MilestoneNotificationEngineService } from './services/milestone-notific
 import { SavingsCalculatorService } from './services/savings-calculator.service';
 import { GroupPermissionGuard } from './guards/group-permission.guard';
 import { MailModule } from '../mail/mail.module';
+import { TransactionsModule } from '../transactions/transactions.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     MailModule,
+    TransactionsModule,
     TypeOrmModule.forFeature([
       SavingsProduct,
       UserSubscription,

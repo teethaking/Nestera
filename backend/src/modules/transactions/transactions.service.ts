@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder, Brackets, IsNull } from 'typeorm';
 import { Readable } from 'stream';
@@ -18,6 +18,11 @@ import { TransactionSavedSearch } from './entities/transaction-saved-search.enti
 import { CreateSavedSearchDto } from './dto/create-saved-search.dto';
 import { UpdateSavedSearchDto } from './dto/update-saved-search.dto';
 import { SavedSearchResponseDto } from './dto/saved-search-response.dto';
+import {
+  decodeCursor,
+  encodeCursor,
+} from '../../common/helpers/cursor-pagination.helper';
+import { TransactionSortBy } from './dto/transaction-search-criteria.dto';
 
 @Injectable()
 export class TransactionsService {
@@ -40,18 +45,52 @@ export class TransactionsService {
     userId: string,
     queryDto: TransactionQueryDto,
   ): Promise<PageDto<TransactionResponseDto>> {
+    if (queryDto.cursor && queryDto.sortBy !== TransactionSortBy.CREATED_AT) {
+      throw new BadRequestException(
+        'Cursor pagination is only supported when sortBy=createdAt',
+      );
+    }
+
     const queryBuilder = this.buildQuery(userId, queryDto);
+    const pageSize = queryDto.pageSize;
 
-    queryBuilder.skip(queryDto.skip).take(queryDto.limit ?? 10);
+    if (queryDto.cursor) {
+      const cursor = decodeCursor(queryDto.cursor);
+      const order = queryDto.order ?? Order.DESC;
+      const operator = order === Order.ASC ? '>' : '<';
+      queryBuilder.andWhere(
+        `(transaction.createdAt ${operator} :cursorCreatedAt OR (transaction.createdAt = :cursorCreatedAt AND transaction.id ${operator} :cursorId))`,
+        {
+          cursorCreatedAt: new Date(cursor.createdAt),
+          cursorId: cursor.id,
+        },
+      );
+    } else {
+      queryBuilder.skip(queryDto.skip);
+    }
+    queryBuilder.take(pageSize + 1);
 
-    const [data, totalItemCount] = await queryBuilder.getManyAndCount();
+    const rows = await queryBuilder.getMany();
+    const hasMore = rows.length > pageSize;
+    const data = hasMore ? rows.slice(0, pageSize) : rows;
     const transformedData = data.map((transaction) =>
       this.transformToResponseDto(transaction),
     );
+    const nextCursor =
+      hasMore && data.length > 0
+        ? encodeCursor({
+            createdAt: data[data.length - 1].createdAt.toISOString(),
+            id: data[data.length - 1].id,
+          })
+        : null;
+    const totalItemCount = queryDto.shouldIncludeTotal
+      ? await this.buildQuery(userId, queryDto).getCount()
+      : undefined;
 
     const meta = new PageMetaDto({
       pageOptionsDto: queryDto,
       totalItemCount,
+      nextCursor,
     });
 
     return new PageDto(transformedData, meta);
@@ -335,8 +374,10 @@ export class TransactionsService {
     const sortBy = queryDto.sortBy ?? 'createdAt';
     const orderByColumn =
       this.sortableColumns[sortBy] ?? this.sortableColumns.createdAt;
+    const order = queryDto.order ?? Order.DESC;
 
-    queryBuilder.orderBy(orderByColumn, queryDto.order ?? Order.DESC);
+    queryBuilder.orderBy(orderByColumn, order);
+    queryBuilder.addOrderBy('transaction.id', order);
 
     return queryBuilder;
   }

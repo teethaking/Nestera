@@ -15,6 +15,12 @@ import { ConfigService } from '@nestjs/config';
 import { NotificationsService } from './notifications.service';
 import { OnEvent } from '@nestjs/event-emitter';
 
+const websocketCorsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const websocketCorsCredentials = process.env.CORS_CREDENTIALS === 'true';
+
 export type NotificationPayload = {
   id: string;
   userId: string;
@@ -34,9 +40,9 @@ export type NotificationAckPayload = {
 @WebSocketGateway({
   namespace: '/notifications',
   cors: {
-    origin: '*',
+    origin: websocketCorsOrigins,
     methods: ['GET', 'POST'],
-    credentials: true,
+    credentials: websocketCorsCredentials,
   },
 })
 export class NotificationsGateway

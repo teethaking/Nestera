@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Param,
   Body,
   Query,
@@ -17,6 +18,7 @@ import {
   ApiResponse,
   ApiQuery,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import * as path from 'path';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -33,6 +35,7 @@ export class DataExportController {
 
   @Post('export')
   @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ export: { limit: 6, ttl: 15 * 60 * 1000 } })
   @ApiOperation({ summary: 'Request a GDPR data export (async)' })
   @ApiResponse({ status: 202, description: 'Export request accepted' })
   requestExport(
@@ -43,6 +46,7 @@ export class DataExportController {
   }
 
   @Get('export/:requestId/status')
+  @Throttle({ export: { limit: 12, ttl: 15 * 60 * 1000 } })
   @ApiOperation({ summary: 'Check export request status' })
   getStatus(
     @CurrentUser() user: { id: string },
@@ -52,20 +56,42 @@ export class DataExportController {
   }
 
   @Get('export/download/:token')
+  @Throttle({ export: { limit: 6, ttl: 15 * 60 * 1000 } })
   @ApiOperation({ summary: 'Download export ZIP by token' })
-  async download(@Param('token') token: string, @Res() res: Response) {
-    const { filePath } = await this.dataExportService.getExportFile(token);
+  async download(
+    @CurrentUser() user: { id: string },
+    @Param('token') token: string,
+    @Res() res: Response,
+  ) {
+    const { filePath } = await this.dataExportService.getExportFile(
+      token,
+      user.id,
+    );
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader(
       'Content-Disposition',
       'attachment; filename="nestera-data-export.zip"',
     );
-    res.sendFile(path.resolve(filePath));
+    res.sendFile(filePath);
+  }
+
+  @Delete('export/:requestId')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ export: { limit: 6, ttl: 15 * 60 * 1000 } })
+  @ApiOperation({
+    summary: 'Cancel a pending/processing export request',
+  })
+  cancelExport(
+    @CurrentUser() user: { id: string },
+    @Param('requestId') requestId: string,
+  ) {
+    return this.dataExportService.cancelExport(requestId, user.id);
   }
 
   // ─── Typed export endpoints ───────────────────────────────────────────────
 
   @Get('export/transactions')
+  @Throttle({ export: { limit: 6, ttl: 15 * 60 * 1000 } })
   @ApiOperation({ summary: 'Export transaction history as JSON' })
   @ApiQuery({
     name: 'from',
@@ -82,18 +108,21 @@ export class DataExportController {
   }
 
   @Get('export/goals')
+  @Throttle({ export: { limit: 6, ttl: 15 * 60 * 1000 } })
   @ApiOperation({ summary: 'Export savings goals as JSON' })
   exportGoals(@CurrentUser() user: { id: string }) {
     return this.dataExportService.exportGoals(user.id);
   }
 
   @Get('export/portfolio')
+  @Throttle({ export: { limit: 6, ttl: 15 * 60 * 1000 } })
   @ApiOperation({ summary: 'Export portfolio summary as JSON' })
   exportPortfolio(@CurrentUser() user: { id: string }) {
     return this.dataExportService.exportPortfolio(user.id);
   }
 
   @Get('export/analytics')
+  @Throttle({ export: { limit: 6, ttl: 15 * 60 * 1000 } })
   @ApiOperation({ summary: 'Export analytics data as JSON' })
   @ApiQuery({ name: 'from', required: false })
   @ApiQuery({ name: 'to', required: false })
@@ -108,6 +137,7 @@ export class DataExportController {
   // ─── Export history ───────────────────────────────────────────────────────
 
   @Get('export/history')
+  @Throttle({ export: { limit: 20, ttl: 15 * 60 * 1000 } })
   @ApiOperation({
     summary: 'List all past export requests for the current user',
   })

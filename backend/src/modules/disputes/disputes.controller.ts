@@ -8,15 +8,31 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
+  FileTypeValidator,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiConsumes,
+  ApiBody,
+} from '@nestjs/swagger';
 import { DisputesService } from './disputes.service';
+import { CorrelationId } from '../../common/decorators/correlation-id.decorator';
+import { RequestId } from '../../common/decorators/request-id.decorator';
 import {
   CreateDisputeDto,
   UpdateDisputeDto,
   AddDisputeMessageDto,
 } from './dto/dispute.dto';
+import { UploadEvidenceDto } from './dto/upload-evidence.dto';
 import { Dispute, DisputeMessage } from './entities/dispute.entity';
+import { DisputeEvidence } from './entities/dispute-evidence.entity';
 
 @ApiTags('disputes')
 @Controller('disputes')
@@ -30,8 +46,14 @@ export class DisputesController {
   @ApiResponse({ status: 400, description: 'Invalid claim ID' })
   async createDispute(
     @Body() createDisputeDto: CreateDisputeDto,
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<Dispute> {
-    return await this.disputesService.createDispute(createDisputeDto);
+    return await this.disputesService.createDispute(
+      createDisputeDto,
+      correlationId,
+      requestId,
+    );
   }
 
   @Get()
@@ -91,8 +113,15 @@ export class DisputesController {
   async startInvestigation(
     @Param('id') id: string,
     @Query('actor') actor: string,
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<Dispute> {
-    return await this.disputesService.startInvestigation(id, actor);
+    return await this.disputesService.startInvestigation(
+      id,
+      actor,
+      correlationId,
+      requestId,
+    );
   }
 
   @Patch(':id/resolve')
@@ -103,8 +132,16 @@ export class DisputesController {
     @Param('id') id: string,
     @Query('actor') actor: string,
     @Body('resolution') resolution: string,
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<Dispute> {
-    return await this.disputesService.resolveDispute(id, actor, resolution);
+    return await this.disputesService.resolveDispute(
+      id,
+      actor,
+      resolution,
+      correlationId,
+      requestId,
+    );
   }
 
   @Patch(':id/close')
@@ -114,8 +151,15 @@ export class DisputesController {
   async closeDispute(
     @Param('id') id: string,
     @Query('actor') actor: string,
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<Dispute> {
-    return await this.disputesService.closeDispute(id, actor);
+    return await this.disputesService.closeDispute(
+      id,
+      actor,
+      correlationId,
+      requestId,
+    );
   }
 
   @Patch(':id/escalate')
@@ -125,7 +169,86 @@ export class DisputesController {
   async escalateDispute(
     @Param('id') id: string,
     @Query('actor') actor: string,
+    @CorrelationId() correlationId?: string,
+    @RequestId() requestId?: string,
   ): Promise<Dispute> {
-    return await this.disputesService.escalateDispute(id, actor);
+    return await this.disputesService.escalateDispute(
+      id,
+      actor,
+      correlationId,
+      requestId,
+    );
+  }
+
+  // ── Evidence endpoints ──────────────────────────────────────────────────────
+
+  @Post(':id/evidence')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Upload evidence file for a dispute (triggers background processing)',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['uploadedBy', 'file'],
+      properties: {
+        uploadedBy: { type: 'string', example: 'Hospital Admin' },
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Evidence uploaded and processing job enqueued',
+    type: DisputeEvidence,
+  })
+  @ApiResponse({ status: 404, description: 'Dispute not found' })
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadEvidence(
+    @Param('id') id: string,
+    @Body() dto: UploadEvidenceDto,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 20 * 1024 * 1024 }), // 20 MB
+          new FileTypeValidator({
+            fileType: /(application\/pdf|image\/jpeg|image\/png|image\/webp)/,
+          }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ): Promise<DisputeEvidence> {
+    return this.disputesService.uploadEvidence(id, file, dto);
+  }
+
+  @Get(':id/evidence')
+  @ApiOperation({ summary: 'List all evidence files for a dispute' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of evidence records',
+    type: [DisputeEvidence],
+  })
+  @ApiResponse({ status: 404, description: 'Dispute not found' })
+  async listEvidence(@Param('id') id: string): Promise<DisputeEvidence[]> {
+    return this.disputesService.listEvidence(id);
+  }
+
+  @Get(':id/evidence/:evidenceId')
+  @ApiOperation({
+    summary: 'Get processing status for a specific evidence file',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Evidence processing status',
+    type: DisputeEvidence,
+  })
+  @ApiResponse({ status: 404, description: 'Evidence not found' })
+  async getEvidenceStatus(
+    @Param('id') id: string,
+    @Param('evidenceId') evidenceId: string,
+  ): Promise<DisputeEvidence> {
+    return this.disputesService.getEvidenceStatus(id, evidenceId);
   }
 }

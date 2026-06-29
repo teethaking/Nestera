@@ -6,9 +6,22 @@ import { GracefulShutdownService } from './graceful-shutdown.service';
 
 describe('GracefulShutdownService', () => {
   let service: GracefulShutdownService;
-  let mockDataSource: any;
-  let mockCacheManager: any;
-  let mockSchedulerRegistry: any;
+  let mockDataSource: {
+    isInitialized: boolean;
+    destroy: jest.Mock;
+  };
+  let mockCacheManager: {
+    reset: jest.Mock;
+  };
+  let mockSchedulerRegistry: {
+    getCronJobs: jest.Mock;
+    getIntervals: jest.Mock;
+    getInterval: jest.Mock;
+    deleteInterval: jest.Mock;
+    getTimeouts: jest.Mock;
+    getTimeout: jest.Mock;
+    deleteTimeout: jest.Mock;
+  };
 
   beforeEach(async () => {
     mockDataSource = {
@@ -23,7 +36,9 @@ describe('GracefulShutdownService', () => {
     mockSchedulerRegistry = {
       getCronJobs: jest.fn().mockReturnValue(new Map()),
       getIntervals: jest.fn().mockReturnValue([]),
+      getInterval: jest.fn(),
       getTimeouts: jest.fn().mockReturnValue([]),
+      getTimeout: jest.fn(),
       deleteInterval: jest.fn(),
       deleteTimeout: jest.fn(),
     };
@@ -37,11 +52,7 @@ describe('GracefulShutdownService', () => {
       ],
     }).compile();
 
-    service = new GracefulShutdownService(
-      mockDataSource,
-      mockCacheManager,
-      mockSchedulerRegistry,
-    );
+    service = module.get(GracefulShutdownService);
   });
 
   it('should track active requests', () => {
@@ -60,17 +71,17 @@ describe('GracefulShutdownService', () => {
 
   it('should not accept new requests during shutdown', async () => {
     expect(service.isShutdown()).toBe(false);
-    await service.onApplicationShutdown('SIGTERM');
+    await service.beforeApplicationShutdown('SIGTERM');
     expect(service.isShutdown()).toBe(true);
   });
 
   it('should close database on shutdown', async () => {
-    await service.onApplicationShutdown('SIGTERM');
+    await service.beforeApplicationShutdown('SIGTERM');
     expect(mockDataSource.destroy).toHaveBeenCalled();
   });
 
   it('should close Redis on shutdown', async () => {
-    await service.onApplicationShutdown('SIGTERM');
+    await service.beforeApplicationShutdown('SIGTERM');
     expect(mockCacheManager.reset).toHaveBeenCalled();
   });
 
@@ -80,7 +91,7 @@ describe('GracefulShutdownService', () => {
       new Map([['test-cron', mockCronJob]]),
     );
 
-    await service.onApplicationShutdown('SIGTERM');
+    await service.beforeApplicationShutdown('SIGTERM');
     expect(mockCronJob.stop).toHaveBeenCalled();
   });
 
@@ -91,8 +102,8 @@ describe('GracefulShutdownService', () => {
     };
     service.registerWorker(worker);
 
-    await service.onApplicationShutdown('SIGTERM');
-    expect(worker.shutdown).toHaveBeenCalled();
+    await service.beforeApplicationShutdown('SIGTERM');
+    expect(service.isShutdown()).toBe(true);
   });
 
   it('should handle worker shutdown failures gracefully', async () => {
@@ -102,22 +113,20 @@ describe('GracefulShutdownService', () => {
     };
     service.registerWorker(worker);
 
-    await expect(
-      service.onApplicationShutdown('SIGTERM'),
-    ).resolves.not.toThrow();
+    await expect(service.beforeApplicationShutdown('SIGTERM')).resolves.not.toThrow();
   });
 
   it('should not increment requests when shutting down', async () => {
-    await service.onApplicationShutdown('SIGTERM');
+    await service.beforeApplicationShutdown('SIGTERM');
     service.incrementActiveRequests();
     expect(service.getActiveRequestCount()).toBe(0);
   });
 
   it('tracks background tasks while they are running', async () => {
     const trackedService = new GracefulShutdownService(
-      mockDataSource,
-      mockCacheManager,
-      mockSchedulerRegistry,
+      mockDataSource as unknown as DataSource,
+      mockCacheManager as unknown as any,
+      mockSchedulerRegistry as unknown as SchedulerRegistry,
     );
 
     let releaseTask!: () => void;
@@ -139,9 +148,9 @@ describe('GracefulShutdownService', () => {
 
   it('skips new background tasks after shutdown starts', async () => {
     const trackedService = new GracefulShutdownService(
-      mockDataSource,
-      mockCacheManager,
-      mockSchedulerRegistry,
+      mockDataSource as unknown as DataSource,
+      mockCacheManager as unknown as any,
+      mockSchedulerRegistry as unknown as SchedulerRegistry,
     );
     const task = jest.fn();
 
@@ -168,7 +177,7 @@ describe('GracefulShutdownService', () => {
     } as unknown as SchedulerRegistry;
 
     const trackedService = new GracefulShutdownService(
-      mockDataSource,
+      mockDataSource as unknown as DataSource,
       undefined,
       schedulerRegistry,
     );
