@@ -9,12 +9,14 @@ import {
   Body,
   Post,
   HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
+  ApiParam,
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { format as csvFormat } from '@fast-csv/format';
@@ -24,7 +26,12 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AdminTransactionsService } from './admin-transactions.service';
+import { AdminExportService } from './services/admin-export.service';
 import { AdminTransactionFilterDto } from './dto/admin-transaction-filter.dto';
+import {
+  AdminExportJobResponseDto,
+  AdminTransactionExportRequestDto,
+} from './dto/admin-export.dto';
 import { PageDto } from '../../common/dto/page.dto';
 import { PageOptionsDto } from '../../common/dto/page-options.dto';
 import { Transaction } from '../transactions/entities/transaction.entity';
@@ -38,11 +45,12 @@ import { AdminTransactionNote } from './entities/admin-transaction-note.entity';
 @ApiTags('admin')
 @Controller('admin/transactions')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN)
+@Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
 @ApiBearerAuth()
 export class AdminTransactionsController {
   constructor(
     private readonly adminTransactionsService: AdminTransactionsService,
+    private readonly adminExportService: AdminExportService,
   ) {}
 
   @Get()
@@ -89,6 +97,7 @@ export class AdminTransactionsController {
   }
 
   @Get('export')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
   @ApiOperation({ summary: 'Export transactions to CSV' })
   @ApiResponse({
     status: 200,
@@ -96,6 +105,7 @@ export class AdminTransactionsController {
   })
   async exportCsv(
     @Query() query: AdminTransactionFilterDto,
+    @CurrentUser() user: { id: string; role: Role },
     @Res() res: Response,
   ): Promise<void> {
     res.setHeader('Content-Type', 'text/csv');
@@ -107,10 +117,74 @@ export class AdminTransactionsController {
     const csvStream = csvFormat({ headers: true, quoteColumns: true });
     csvStream.pipe(res);
 
-    await this.adminTransactionsService.streamCsv(query, csvStream);
+    await this.adminExportService.streamTransactionsCsv(
+      user.role,
+      query,
+      csvStream,
+    );
+  }
+
+  @Post('export/async')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Queue an async transactions CSV export job' })
+  @ApiResponse({
+    status: 202,
+    description: 'Export job accepted for processing',
+    type: AdminExportJobResponseDto,
+  })
+  async exportAsync(
+    @Body() body: AdminTransactionExportRequestDto,
+    @CurrentUser() user: { id: string; role: Role },
+  ): Promise<AdminExportJobResponseDto> {
+    return this.adminExportService.requestTransactionsExportJob(
+      user.id,
+      user.role,
+      body,
+    );
+  }
+
+  @Get('export/jobs/:jobId')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
+  @ApiOperation({ summary: 'Get transactions export job status' })
+  @ApiParam({ name: 'jobId', description: 'Export job UUID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Export job status',
+    type: AdminExportJobResponseDto,
+  })
+  async getExportJobStatus(
+    @Param('jobId') jobId: string,
+    @CurrentUser() user: { id: string },
+  ): Promise<AdminExportJobResponseDto> {
+    return this.adminExportService.getExportJobStatus(user.id, jobId);
+  }
+
+  @Get('export/jobs/:jobId/download')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
+  @ApiOperation({ summary: 'Download a completed transactions export job' })
+  @ApiParam({ name: 'jobId', description: 'Export job UUID' })
+  @ApiResponse({ status: 200, description: 'CSV export file download' })
+  async downloadExportJob(
+    @Param('jobId') jobId: string,
+    @CurrentUser() user: { id: string },
+    @Res() res: Response,
+  ): Promise<void> {
+    const download = await this.adminExportService.getExportJobDownload(
+      user.id,
+      jobId,
+    );
+
+    res.setHeader('Content-Type', download.contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${download.fileName}"`,
+    );
+    res.sendFile(download.filePath);
   }
 
   @Patch(':id/flag')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Flag a transaction for review' })
   @ApiResponse({
     status: 200,
@@ -133,6 +207,7 @@ export class AdminTransactionsController {
   }
 
   @Post(':id/notes')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(201)
   @ApiOperation({ summary: 'Add an admin note to a transaction' })
   @ApiResponse({

@@ -12,6 +12,7 @@ import { AuditLogService } from './services/audit-log.service';
 import { ContractCompatibilityService } from './services/contract-compatibility.service';
 import { CacheModule } from '../modules/cache/cache.module';
 import { AuditLog } from './entities/audit-log.entity';
+import { DataScopeService } from './services/data-scope.service';
 import { DistributedLockModule } from './distributed-lock/distributed-lock.module';
 
 @Global()
@@ -28,6 +29,7 @@ import { DistributedLockModule } from './distributed-lock/distributed-lock.modul
     CompressionMetricsMiddleware,
     AuditLogService,
     ContractCompatibilityService,
+    DataScopeService,
   ],
   exports: [
     RateLimitMonitorService,
@@ -38,6 +40,7 @@ import { DistributedLockModule } from './distributed-lock/distributed-lock.modul
     CompressionMetricsService,
     AuditLogService,
     ContractCompatibilityService,
+    DataScopeService,
     DistributedLockModule,
   ],
 })

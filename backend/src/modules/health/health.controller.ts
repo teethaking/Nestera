@@ -33,7 +33,10 @@ import {
 } from './indicators/external-services.health';
 import { StorageHealthIndicator } from './indicators/storage.health';
 import { SystemHealthIndicator } from './indicators/system.health';
-import { HealthHistoryService } from './health-history.service';
+import {
+  HealthHistoryService,
+  HealthCheckResult,
+} from './health-history.service';
 
 @ApiTags('Health')
 @Controller('health')
@@ -179,21 +182,18 @@ export class HealthController {
     const allHealthy = healthyCount === services.length;
     const timestamp = new Date();
 
-    const historyEntries = checks.map((check, index) => {
+    const historyEntries: HealthCheckResult[] = checks.map((check, index) => {
       const service = services[index];
       if (check.status === 'fulfilled') {
         const entry = check.value[service] as
           | Record<string, unknown>
           | undefined;
         const status = (entry?.status as string) ?? 'up';
+        const normalizedStatus: HealthCheckResult['status'] =
+          status === 'up' ? 'up' : status === 'degraded' ? 'degraded' : 'down';
         return {
           service,
-          status:
-            status === 'up'
-              ? 'up'
-              : status === 'degraded'
-                ? 'degraded'
-                : 'down',
+          status: normalizedStatus,
           responseTime: parseInt(String(entry?.responseTime ?? '0'), 10) || 0,
           timestamp,
           error: entry?.message as string | undefined,

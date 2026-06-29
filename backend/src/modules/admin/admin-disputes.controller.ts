@@ -9,6 +9,9 @@ import {
   UseGuards,
   Req,
   Headers,
+  Res,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -16,8 +19,12 @@ import {
   ApiOperation,
   ApiResponse,
   ApiQuery,
+  ApiParam,
 } from '@nestjs/swagger';
+import { Response } from 'express';
+import { format as csvFormat } from '@fast-csv/format';
 import { AdminDisputesService } from './admin-disputes.service';
+import { AdminExportService } from './services/admin-export.service';
 import {
   DisputeFilterDto,
   AssignDisputeDto,
@@ -26,19 +33,27 @@ import {
   AddEvidenceDto,
   UpdateDisputeDto,
 } from './dto/admin-dispute.dto';
+import {
+  AdminDisputeExportRequestDto,
+  AdminExportJobResponseDto,
+} from './dto/admin-export.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Dispute, DisputeTimeline } from '../disputes/entities/dispute.entity';
 
 @ApiTags('admin/disputes')
 @Controller('admin/disputes')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN)
+@Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
 @ApiBearerAuth()
 export class AdminDisputesController {
-  constructor(private readonly adminDisputesService: AdminDisputesService) {}
+  constructor(
+    private readonly adminDisputesService: AdminDisputesService,
+    private readonly adminExportService: AdminExportService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all disputes with filters' })
@@ -89,6 +104,93 @@ export class AdminDisputesController {
     return await this.adminDisputesService.getStats();
   }
 
+  @Get('export')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
+  @ApiOperation({ summary: 'Export disputes to CSV' })
+  @ApiResponse({
+    status: 200,
+    description: 'CSV file containing filtered disputes',
+  })
+  async exportCsv(
+    @Query() filters: DisputeFilterDto,
+    @CurrentUser() user: { id: string; role: Role },
+    @Res() res: Response,
+  ): Promise<void> {
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="admin_disputes_export.csv"',
+    );
+
+    const csvStream = csvFormat({ headers: true, quoteColumns: true });
+    csvStream.pipe(res);
+
+    await this.adminExportService.streamDisputesCsv(
+      user.role,
+      filters,
+      csvStream,
+    );
+  }
+
+  @Post('export/async')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Queue an async disputes CSV export job' })
+  @ApiResponse({
+    status: 202,
+    description: 'Export job accepted for processing',
+    type: AdminExportJobResponseDto,
+  })
+  async exportAsync(
+    @Body() body: AdminDisputeExportRequestDto,
+    @CurrentUser() user: { id: string; role: Role },
+  ): Promise<AdminExportJobResponseDto> {
+    return this.adminExportService.requestDisputesExportJob(
+      user.id,
+      user.role,
+      body,
+    );
+  }
+
+  @Get('export/jobs/:jobId')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
+  @ApiOperation({ summary: 'Get disputes export job status' })
+  @ApiParam({ name: 'jobId', description: 'Export job UUID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Export job status',
+    type: AdminExportJobResponseDto,
+  })
+  async getExportJobStatus(
+    @Param('jobId') jobId: string,
+    @CurrentUser() user: { id: string },
+  ): Promise<AdminExportJobResponseDto> {
+    return this.adminExportService.getExportJobStatus(user.id, jobId);
+  }
+
+  @Get('export/jobs/:jobId/download')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
+  @ApiOperation({ summary: 'Download a completed disputes export job' })
+  @ApiParam({ name: 'jobId', description: 'Export job UUID' })
+  @ApiResponse({ status: 200, description: 'CSV export file download' })
+  async downloadExportJob(
+    @Param('jobId') jobId: string,
+    @CurrentUser() user: { id: string },
+    @Res() res: Response,
+  ): Promise<void> {
+    const download = await this.adminExportService.getExportJobDownload(
+      user.id,
+      jobId,
+    );
+
+    res.setHeader('Content-Type', download.contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${download.fileName}"`,
+    );
+    res.sendFile(download.filePath);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get dispute by ID' })
   @ApiResponse({ status: 200, description: 'Dispute details', type: Dispute })
@@ -110,6 +212,7 @@ export class AdminDisputesController {
   }
 
   @Post(':id/assign')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Assign dispute to admin' })
   @ApiResponse({ status: 200, description: 'Dispute assigned', type: Dispute })
   @ApiResponse({ status: 404, description: 'Dispute not found' })
@@ -129,6 +232,7 @@ export class AdminDisputesController {
   }
 
   @Post(':id/resolve')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Resolve a dispute' })
   @ApiResponse({ status: 200, description: 'Dispute resolved', type: Dispute })
   @ApiResponse({ status: 404, description: 'Dispute not found' })
@@ -148,6 +252,7 @@ export class AdminDisputesController {
   }
 
   @Post(':id/escalate')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Escalate dispute to senior admin' })
   @ApiResponse({ status: 200, description: 'Dispute escalated', type: Dispute })
   @ApiResponse({ status: 404, description: 'Dispute not found' })
@@ -167,6 +272,7 @@ export class AdminDisputesController {
   }
 
   @Post(':id/evidence')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Add evidence/document to dispute' })
   @ApiResponse({ status: 200, description: 'Evidence added', type: Dispute })
   @ApiResponse({ status: 404, description: 'Dispute not found' })
@@ -186,6 +292,7 @@ export class AdminDisputesController {
   }
 
   @Patch(':id')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Update dispute status/priority' })
   @ApiResponse({ status: 200, description: 'Dispute updated', type: Dispute })
   @ApiResponse({ status: 404, description: 'Dispute not found' })

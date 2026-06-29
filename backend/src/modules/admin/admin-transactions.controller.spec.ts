@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AdminTransactionsController } from './admin-transactions.controller';
 import { AdminTransactionsService } from './admin-transactions.service';
+import { AdminExportService } from './services/admin-export.service';
 import { AdminTransactionFilterDto } from './dto/admin-transaction-filter.dto';
 import { PageDto } from '../../common/dto/page.dto';
 import { Transaction } from '../transactions/entities/transaction.entity';
@@ -13,6 +14,13 @@ describe('AdminTransactionsController', () => {
     findAll: jest.fn(),
   };
 
+  const mockAdminExportService = {
+    streamTransactionsCsv: jest.fn(),
+    requestTransactionsExportJob: jest.fn(),
+    getExportJobStatus: jest.fn(),
+    getExportJobDownload: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AdminTransactionsController],
@@ -20,6 +28,10 @@ describe('AdminTransactionsController', () => {
         {
           provide: AdminTransactionsService,
           useValue: mockAdminTransactionsService,
+        },
+        {
+          provide: AdminExportService,
+          useValue: mockAdminExportService,
         },
       ],
     }).compile();
