@@ -129,6 +129,14 @@
       "description": "Resource conflict"
     },
     {
+      "code": "SYS_413",
+      "httpStatus": 413,
+      "defaultMessage": "Request body too large. Maximum allowed size exceeded.",
+      "localizationKey": "SYS_413",
+      "category": "SYS",
+      "description": "Payload too large - request body exceeds limit"
+    },
+    {
       "code": "SYS_500",
       "httpStatus": 500,
       "defaultMessage": "Internal server error. Please try again later.",
