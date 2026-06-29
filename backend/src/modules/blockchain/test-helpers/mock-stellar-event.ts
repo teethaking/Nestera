@@ -5,7 +5,7 @@ export const mockEvent = (overrides: Partial<rpc.Api.EventResponse> = {}) => {
     id: 'event-1',
     ledger: 100,
     pagingToken: 'paging-1',
-    contractId: 'contract-1',
+    contractId: 'contract-1' as any,
     txHash: 'tx-1',
     inSuccessfulContractCall: true,
     ledgerClosedAt: '2020-01-01T00:00:00Z',

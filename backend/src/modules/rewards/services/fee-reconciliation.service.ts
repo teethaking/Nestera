@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository, Between, DeepPartial } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
@@ -55,12 +55,14 @@ export class FeeReconciliationService {
       difference,
       discrepancyPercentage: Number(discrepancyPercentage.toFixed(3)),
       status,
-      notes: notes ?? null,
+      notes: notes ?? undefined,
       reconciledAt:
-        status === ReconciliationStatus.RECONCILED ? new Date() : null,
-    });
+        status === ReconciliationStatus.RECONCILED ? new Date() : undefined,
+    } as unknown as DeepPartial<FeeReconciliation>) as unknown as FeeReconciliation;
 
-    const saved = await this.reconciliationRepo.save(reconciliation);
+    const saved = await this.reconciliationRepo.save(
+      reconciliation,
+    ) as unknown as FeeReconciliation;
 
     if (status === ReconciliationStatus.DISCREPANCY) {
       this.eventEmitter.emit('reconciliation.discrepancy', {
