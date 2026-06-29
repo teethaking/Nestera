@@ -20,10 +20,12 @@ describe('AdminTransactionsService', () => {
   beforeEach(async () => {
     // Create a mock query builder with chainable methods
     mockQueryBuilder = {
+      alias: 'tx',
       andWhere: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
       getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
       getMany: jest.fn().mockResolvedValue([]),
     };
@@ -470,7 +472,7 @@ describe('AdminTransactionsService', () => {
 
       const result = await service.findAll(query);
 
-      expect(result.data).toEqual([]);
+      expect(result.items).toEqual([]);
       expect(result.meta.totalItemCount).toBe(0);
       expect(result.meta.pageCount).toBe(0);
     });
@@ -528,9 +530,12 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
+      const result = await service.findSuspicious({
+        skip: 0,
+        limit: 10,
+      } as any);
 
-      expect(result.data).toEqual([]);
+      expect(result.items).toEqual([]);
       expect(result.meta.totalItemCount).toBe(0);
       expect(largeAmountQB.where).toHaveBeenCalledWith(
         'CAST(tx.amount AS DECIMAL) > :threshold',
@@ -585,12 +590,15 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
+      const result = await service.findSuspicious({
+        skip: 0,
+        limit: 10,
+      } as any);
 
-      expect(result.data).toHaveLength(1);
-      expect(result.data[0].id).toBe('tx-above-threshold');
-      expect(result.data[0].amount).toBe('10001');
-      expect(result.data[0].reasons).toContain(
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].id).toBe('tx-above-threshold');
+      expect(result.items[0].amount).toBe('10001');
+      expect(result.items[0].reasons).toContain(
         'Amount exceeds threshold of 10000 units',
       );
       expect(largeAmountQB.where).toHaveBeenCalledWith(
@@ -646,12 +654,15 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
+      const result = await service.findSuspicious({
+        skip: 0,
+        limit: 10,
+      } as any);
 
-      expect(result.data).toHaveLength(1);
-      expect(result.data[0].id).toBe('tx-slightly-above');
-      expect(result.data[0].amount).toBe('10000.01');
-      expect(result.data[0].reasons).toContain(
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].id).toBe('tx-slightly-above');
+      expect(result.items[0].amount).toBe('10000.01');
+      expect(result.items[0].reasons).toContain(
         'Amount exceeds threshold of 10000 units',
       );
       expect(largeAmountQB.where).toHaveBeenCalledWith(
@@ -714,9 +725,12 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
+      const result = await service.findSuspicious({
+        skip: 0,
+        limit: 10,
+      } as any);
 
-      expect(result.data).toEqual([]);
+      expect(result.items).toEqual([]);
       expect(result.meta.totalItemCount).toBe(0);
       expect(highVelocityQB.where).toHaveBeenCalledWith(
         expect.stringContaining('> :velocityMaxCount'),
@@ -778,13 +792,16 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 20 } as any);
+      const result = await service.findSuspicious({
+        skip: 0,
+        limit: 20,
+      } as any);
 
-      expect(result.data.length).toBeGreaterThan(0);
+      expect(result.items.length).toBeGreaterThan(0);
       // All 11 transactions should be flagged
-      expect(result.data).toHaveLength(11);
+      expect(result.items).toHaveLength(11);
       // Verify each transaction has the high velocity reason
-      result.data.forEach((tx) => {
+      result.items.forEach((tx) => {
         expect(tx.reasons).toContain(
           'User submitted more than 10 transactions within a 1-hour window',
         );
@@ -849,9 +866,12 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
+      const result = await service.findSuspicious({
+        skip: 0,
+        limit: 10,
+      } as any);
 
-      expect(result.data).toEqual([]);
+      expect(result.items).toEqual([]);
       expect(result.meta.totalItemCount).toBe(0);
       expect(repeatedFailuresQB.where).toHaveBeenCalledWith(
         `tx.status = 'FAILED'`,
@@ -916,13 +936,16 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 20 } as any);
+      const result = await service.findSuspicious({
+        skip: 0,
+        limit: 20,
+      } as any);
 
-      expect(result.data.length).toBeGreaterThan(0);
+      expect(result.items.length).toBeGreaterThan(0);
       // All 4 transactions should be flagged
-      expect(result.data).toHaveLength(4);
+      expect(result.items).toHaveLength(4);
       // Verify each transaction has the repeated failures reason
-      result.data.forEach((tx) => {
+      result.items.forEach((tx) => {
         expect(tx.reasons).toContain(
           'User has more than 3 failed transactions within a 24-hour window',
         );

@@ -10,6 +10,7 @@ import { BlockchainProcessor } from './processors/blockchain.processor';
 import { ReportProcessor } from './processors/report.processor';
 import { DisputeEvidenceProcessor } from './processors/dispute-evidence.processor';
 import { AvatarProcessor } from './processors/avatar.processor';
+import { AuditLogExportProcessor } from './processors/audit-log-export.processor';
 import { JobQueueService } from './job-queue.service';
 import { JobQueueController } from './job-queue.controller';
 import { DisputeEvidence } from '../disputes/entities/dispute-evidence.entity';
@@ -18,6 +19,7 @@ import { User } from '../user/entities/user.entity';
 import { ReportSchedule } from '../reports/entities/report-schedule.entity';
 import { StorageModule } from '../storage/storage.module';
 import { ReportsModule } from '../reports/reports.module';
+import { AuditLog } from '../../common/entities/audit-log.entity';
 
 const defaultJobOptions = {
   attempts: 3,
@@ -37,6 +39,7 @@ const defaultJobOptions = {
       AvatarUpload,
       User,
       ReportSchedule,
+      AuditLog,
     ]),
     BullModule.forRootAsync({
       imports: [ConfigModule],
@@ -81,6 +84,16 @@ const defaultJobOptions = {
       { name: QUEUE_NAMES.REPORTS, defaultJobOptions },
       { name: QUEUE_NAMES.DISPUTE_EVIDENCE, defaultJobOptions },
       { name: QUEUE_NAMES.AVATAR, defaultJobOptions },
+      {
+        name: QUEUE_NAMES.AUDIT_LOG_EXPORT,
+        defaultJobOptions: {
+          ...defaultJobOptions,
+          attempts: 3,
+          backoff: { type: 'exponential' as const, delay: 2000 },
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 500 },
+        },
+      },
     ),
   ],
   controllers: [JobQueueController],
@@ -92,6 +105,7 @@ const defaultJobOptions = {
     ReportProcessor,
     DisputeEvidenceProcessor,
     AvatarProcessor,
+    AuditLogExportProcessor,
   ],
   exports: [JobQueueService, BullModule],
 })

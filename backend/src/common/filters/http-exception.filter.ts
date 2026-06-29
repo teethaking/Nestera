@@ -43,6 +43,7 @@ const STATUS_TO_ERROR_CODE: Record<number, ErrorCode> = {
   [HttpStatus.CONFLICT]: ErrorCode.CONFLICT,
   [HttpStatus.TOO_MANY_REQUESTS]: ErrorCode.TOO_MANY_REQUESTS,
   [HttpStatus.SERVICE_UNAVAILABLE]: ErrorCode.SERVICE_UNAVAILABLE,
+  [HttpStatus.PAYLOAD_TOO_LARGE]: ErrorCode.PAYLOAD_TOO_LARGE,
 };
 
 function isRpcFallbackError(exception: unknown): exception is Error {
@@ -93,7 +94,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
     const requestId =
       ((request as unknown as Record<string, unknown>).correlationId as
-        string | undefined) ??
+        | string
+        | undefined) ??
       (request.headers['x-correlation-id'] as string) ??
       null;
     const timestamp = new Date().toISOString();

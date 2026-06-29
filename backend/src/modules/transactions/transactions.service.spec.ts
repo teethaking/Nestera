@@ -122,10 +122,10 @@ describe('TransactionsService', () => {
         'transaction.createdAt',
         'DESC',
       );
-      expect(result.data).toHaveLength(1);
-      expect(result.data[0].userId).toBe(userId);
-      expect(result.data[0].formattedDate).toBeDefined();
-      expect(result.data[0].formattedTime).toBeDefined();
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].userId).toBe(userId);
+      expect(result.items[0].formattedDate).toBeDefined();
+      expect(result.items[0].formattedTime).toBeDefined();
       expect(result.meta.totalItemCount).toBe(1);
     });
 

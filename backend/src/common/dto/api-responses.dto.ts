@@ -88,7 +88,7 @@ export class PaginatedMetaDto {
   page: number;
 
   @ApiProperty({ example: 20 })
-  take: number;
+  pageSize: number;
 
   @ApiProperty({ example: 150 })
   itemCount: number;
@@ -101,6 +101,17 @@ export class PaginatedMetaDto {
 
   @ApiProperty({ example: true })
   hasNextPage: boolean;
+
+  @ApiProperty({ example: 'cursor-token-for-next-page', required: false })
+  nextCursor?: string | null;
+}
+
+export class PaginatedResponseDto<T> {
+  @ApiProperty({ isArray: true, description: 'Items on the current page' })
+  items: T[];
+
+  @ApiProperty({ type: () => PaginatedMetaDto })
+  meta: PaginatedMetaDto;
 }
 
 export class SuccessMessageDto {

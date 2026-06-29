@@ -140,6 +140,10 @@ const envValidationSchema = Joi.object({
 
   LOG_DIR: Joi.string().optional(),
   LOG_RETENTION_DAYS: Joi.number().integer().min(1).default(30).optional(),
+
+  COMPRESSION_THRESHOLD: Joi.number().integer().min(0).default(1024),
+  JSON_BODY_LIMIT: Joi.string().default('1mb'),
+  URLENCODED_BODY_LIMIT: Joi.string().default('1mb'),
 });
 
 @Module({

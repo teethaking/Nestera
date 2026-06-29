@@ -4,6 +4,9 @@ module.exports = {
     testEnvironment: 'node',
     testRegex: '.e2e-spec.ts$',
     setupFilesAfterEnv: ['./jest-e2e-setup.ts'],
+    moduleNameMapper: {
+        '^uuid$': '<rootDir>/mocks/uuid.mock.ts',
+    },
     transform: {
         '^.+\\.(t|j)s$': [
             'ts-jest',

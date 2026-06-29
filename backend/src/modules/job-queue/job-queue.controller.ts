@@ -17,10 +17,13 @@ import {
 import { JobQueueService } from './job-queue.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Job Queue')
 @ApiBearerAuth()
 @Controller('admin/queues')
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN)
 export class JobQueueController {
   constructor(private readonly jobQueueService: JobQueueService) {}
@@ -38,6 +41,14 @@ export class JobQueueController {
   async getQueueStatus(@Param('queueName') queueName: string) {
     const status = await this.jobQueueService.getQueueStatus(queueName);
     return { success: true, data: status };
+  }
+
+  @Get(':queueName/dlq-size')
+  @ApiOperation({ summary: 'Get DLQ (dead letter queue) size for a queue' })
+  @ApiParam({ name: 'queueName', description: 'Name of the queue' })
+  async getDLQSize(@Param('queueName') queueName: string) {
+    const size = await this.jobQueueService.getDLQSize(queueName);
+    return { success: true, data: { queueName, dlqSize: size } };
   }
 
   @Get(':queueName/failed')

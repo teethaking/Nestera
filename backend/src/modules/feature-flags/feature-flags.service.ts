@@ -6,9 +6,25 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Inject } from '@nestjs/common';
+import { Cache } from 'cache-manager';
 import { FeatureFlag } from './entities/feature-flag.entity';
 import { CreateFlagDto } from './dto/create-flag.dto';
 import { UpdateFlagDto } from './dto/update-flag.dto';
+
+export interface FeatureEvaluationContext {
+  address?: string;
+  network?: string;
+  segments?: string[];
+}
+
+export interface FeatureEvaluationResult {
+  value: boolean | string | number;
+  reason: string;
+}
+
+const FEATURE_FLAG_CACHE_TTL = 60_000; // 1 minute cache TTL
 
 @Injectable()
 export class FeatureFlagsService {
@@ -17,6 +33,7 @@ export class FeatureFlagsService {
   constructor(
     @InjectRepository(FeatureFlag)
     private readonly flagRepository: Repository<FeatureFlag>,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
   async findAll(): Promise<FeatureFlag[]> {
@@ -54,6 +71,9 @@ export class FeatureFlagsService {
     this.logger.log(`Feature flag updated: ${key}`, {
       changes: Object.keys(dto),
     });
+
+    await this.invalidateCache(key);
+
     return saved;
   }
 
@@ -63,6 +83,9 @@ export class FeatureFlagsService {
     flag.forceDisabled = false;
     const saved = await this.flagRepository.save(flag);
     this.logger.log(`Feature flag toggled: ${key} → ${saved.enabled}`);
+
+    await this.invalidateCache(key);
+
     return saved;
   }
 
@@ -70,23 +93,82 @@ export class FeatureFlagsService {
     const flag = await this.findOne(key);
     await this.flagRepository.remove(flag);
     this.logger.log(`Feature flag deleted: ${key}`);
+
+    await this.invalidateCache(key);
   }
 
-  /**
-   * Evaluate a flag for a given user context.
-   * Useful for server-side rendering and API-based evaluation.
-   */
   async evaluate(
     key: string,
-    context: { address?: string; network?: string; segments?: string[] },
-  ): Promise<{ value: boolean | string | number; reason: string }> {
-    const flag = await this.findOne(key);
+    context: FeatureEvaluationContext,
+  ): Promise<FeatureEvaluationResult> {
+    const cacheKey = this.getCacheKey(key, context);
+    const cached =
+      await this.cacheManager.get<FeatureEvaluationResult>(cacheKey);
 
+    if (cached !== undefined && cached !== null) {
+      this.logger.debug(`Cache HIT for feature flag: ${key}`);
+      return cached;
+    }
+
+    this.logger.debug(`Cache MISS for feature flag: ${key}`);
+
+    const flag = await this.findOne(key);
+    const result = this.evaluateFlag(flag, context);
+
+    await this.cacheManager.set(cacheKey, result, FEATURE_FLAG_CACHE_TTL);
+    this.logger.debug(
+      `Cache SET for feature flag: ${key} ttl=${FEATURE_FLAG_CACHE_TTL}ms`,
+    );
+
+    return result;
+  }
+
+  private getCacheKey(key: string, context: FeatureEvaluationContext): string {
+    const parts = [`flag:${key}`];
+    if (context.address) parts.push(`addr:${context.address.slice(0, 10)}`);
+    if (context.network) parts.push(`net:${context.network}`);
+    if (context.segments?.length)
+      parts.push(`seg:${context.segments.sort().join(',')}`);
+    return parts.join('|');
+  }
+
+  private async invalidateCache(key: string): Promise<void> {
+    try {
+      const allKeys = await this.findAllKeysForFlag(key);
+      for (const cacheKey of allKeys) {
+        await this.cacheManager.del(cacheKey);
+      }
+      this.logger.debug(`Cache invalidated for feature flag: ${key}`);
+    } catch (error) {
+      this.logger.error(`Cache invalidation error for "${key}":`, error);
+    }
+  }
+
+  private async findAllKeysForFlag(key: string): Promise<string[]> {
+    const keys: string[] = [];
+    const featureFlag = await this.findOne(key);
+
+    for (const user of featureFlag.targetUsers || []) {
+      keys.push(`flag:${key}|addr:${user.slice(0, 10)}`);
+    }
+    for (const network of featureFlag.targetNetworks || []) {
+      keys.push(`flag:${key}|net:${network}`);
+    }
+    for (const segment of featureFlag.targetSegments || []) {
+      keys.push(`flag:${key}|seg:${segment}`);
+    }
+
+    return keys;
+  }
+
+  private evaluateFlag(
+    flag: FeatureFlag,
+    context: FeatureEvaluationContext,
+  ): FeatureEvaluationResult {
     if (flag.forceDisabled) {
       return { value: false, reason: 'force_disabled' };
     }
 
-    // User targeting
     if (flag.targetUsers?.length && context.address) {
       const truncated = context.address.slice(0, 10).toLowerCase();
       const isTargeted = flag.targetUsers.some((addr) =>
@@ -103,14 +185,12 @@ export class FeatureFlagsService {
       }
     }
 
-    // Network targeting
     if (flag.targetNetworks?.length && context.network) {
       if (!flag.targetNetworks.includes(context.network)) {
         return { value: flag.defaultValue, reason: 'network_not_targeted' };
       }
     }
 
-    // Segment targeting
     if (flag.targetSegments?.length && context.segments?.length) {
       const hasSegment = flag.targetSegments.some((seg) =>
         context.segments?.includes(seg),
@@ -126,10 +206,9 @@ export class FeatureFlagsService {
       }
     }
 
-    // Rollout
     if (flag.type === 'rollout' && flag.rolloutPercentage !== undefined) {
       const userId = context.address || 'anonymous';
-      const bucket = this.hashBucket(`${key}:${userId}`);
+      const bucket = this.hashBucket(`${flag.key}:${userId}`);
       const inRollout = bucket < flag.rolloutPercentage;
       return {
         value: inRollout,

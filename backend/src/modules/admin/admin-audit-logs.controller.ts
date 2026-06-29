@@ -28,6 +28,9 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { JobQueueService } from '../job-queue/job-queue.service';
+import { QUEUE_NAMES } from '../job-queue/job-queue.constants';
+import { Job } from 'bullmq';
 
 @ApiTags('admin/audit-logs')
 @Controller('admin/audit-logs')
@@ -35,7 +38,10 @@ import { Role } from '../../common/enums/role.enum';
 @Roles(Role.ADMIN)
 @ApiBearerAuth()
 export class AdminAuditLogsController {
-  constructor(private readonly auditLogsService: AdminAuditLogsService) {}
+  constructor(
+    private readonly auditLogsService: AdminAuditLogsService,
+    private readonly jobQueueService: JobQueueService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all audit logs with filters' })
@@ -136,7 +142,79 @@ export class AdminAuditLogsController {
   }
 
   @Post('export')
-  @ApiOperation({ summary: 'Export audit logs to CSV or JSON' })
+  @ApiOperation({
+    summary: 'Queue audit log export - returns job ID for async retrieval',
+  })
+  @ApiResponse({
+    status: 202,
+    description: 'Export job queued',
+    schema: {
+      properties: {
+        jobId: { type: 'string' },
+        message: { type: 'string' },
+      },
+    },
+  })
+  async queueExport(
+    @Body() dto: AuditLogExportDto,
+    @Query('format') format: 'csv' | 'json' = 'csv',
+  ) {
+    const job = await this.jobQueueService.addAuditLogExportJob({
+      filters: {
+        actor: dto.actor,
+        action: dto.action,
+        resourceType: dto.resourceType,
+        resourceId: dto.resourceId,
+        fromDate: dto.fromDate,
+        toDate: dto.toDate,
+      },
+      format,
+      requestedBy: 'admin',
+    });
+
+    return {
+      jobId: job.id,
+      message:
+        'Export job queued. Check status at /admin/audit-logs/export/status/:jobId',
+    };
+  }
+
+  @Get('export/status/:jobId')
+  @ApiOperation({ summary: 'Get status of an audit log export job' })
+  @ApiResponse({
+    status: 200,
+    description: 'Job status',
+    schema: {
+      properties: {
+        status: { type: 'string' },
+        data: { type: 'object' },
+      },
+    },
+  })
+  async getExportStatus(@Param('jobId') jobId: string) {
+    const queue = this.jobQueueService['getQueue'](
+      QUEUE_NAMES.AUDIT_LOG_EXPORT,
+    );
+    if (!queue) {
+      return { status: 'error', message: 'Queue not available' };
+    }
+
+    const job = await queue.getJob(jobId);
+    if (!job) {
+      return { status: 'not_found', message: 'Job not found' };
+    }
+
+    const state = await job.getState();
+    const result = state === 'completed' ? job.returnvalue : null;
+
+    return {
+      status: state,
+      data: result,
+    };
+  }
+
+  @Get('export/download/:jobId')
+  @ApiOperation({ summary: 'Download completed audit log export' })
   @ApiProduces('text/csv', 'application/json')
   @ApiResponse({
     status: 200,
@@ -146,19 +224,38 @@ export class AdminAuditLogsController {
       format: 'binary',
     },
   })
-  async exportAuditLogs(
-    @Body() dto: AuditLogExportDto,
-    @Query('format') format: 'csv' | 'json' = 'csv',
-    @Res() res: Response,
-  ) {
-    const data = await this.auditLogsService.exportLogs(dto, format);
+  async downloadExport(@Param('jobId') jobId: string, @Res() res: Response) {
+    const queue = this.jobQueueService['getQueue'](
+      QUEUE_NAMES.AUDIT_LOG_EXPORT,
+    );
+    if (!queue) {
+      return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
+        message: 'Queue not available',
+      });
+    }
 
+    const job = await queue.getJob(jobId);
+    if (!job) {
+      return res.status(HttpStatus.NOT_FOUND).json({
+        message: 'Job not found',
+      });
+    }
+
+    const state = await job.getState();
+    if (state !== 'completed') {
+      return res.status(HttpStatus.ACCEPTED).json({
+        message: `Job is still ${state}`,
+      });
+    }
+
+    const result = job.returnvalue;
+    const format = job.data.format;
     const contentType = format === 'json' ? 'application/json' : 'text/csv';
     const filename = `audit-logs-${new Date().toISOString().split('T')[0]}.${format}`;
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.status(HttpStatus.OK).send(data);
+    res.status(HttpStatus.OK).send(result?.data || '');
   }
 
   @Post('cleanup')

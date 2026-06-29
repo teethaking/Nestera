@@ -201,7 +201,7 @@ export class HealthController {
       }
       return {
         service,
-        status: 'down' as const,
+        status: 'down',
         responseTime: 0,
         timestamp,
         error: check.reason?.message || 'Unknown error',

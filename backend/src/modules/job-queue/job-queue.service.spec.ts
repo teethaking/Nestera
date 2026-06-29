@@ -22,6 +22,7 @@ describe('JobQueueService', () => {
   let reportQueue: ReturnType<typeof createMockQueue>;
   let disputeEvidenceQueue: ReturnType<typeof createMockQueue>;
   let avatarQueue: ReturnType<typeof createMockQueue>;
+  let auditLogExportQueue: ReturnType<typeof createMockQueue>;
 
   beforeEach(async () => {
     notificationQueue = createMockQueue();
@@ -30,6 +31,7 @@ describe('JobQueueService', () => {
     reportQueue = createMockQueue();
     disputeEvidenceQueue = createMockQueue();
     avatarQueue = createMockQueue();
+    auditLogExportQueue = createMockQueue();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -49,6 +51,10 @@ describe('JobQueueService', () => {
           useValue: disputeEvidenceQueue,
         },
         { provide: getQueueToken(QUEUE_NAMES.AVATAR), useValue: avatarQueue },
+        {
+          provide: getQueueToken(QUEUE_NAMES.AUDIT_LOG_EXPORT),
+          useValue: auditLogExportQueue,
+        },
       ],
     }).compile();
 
@@ -136,6 +142,49 @@ describe('JobQueueService', () => {
     });
   });
 
+  describe('addAvatarProcessingJob', () => {
+    it('should add an avatar processing job with deduplication key', async () => {
+      const data = {
+        uploadId: 'upload-1',
+        userId: 'user-1',
+        storagePath: 'avatars/user-1/raw.png',
+        mimeType: 'image/png',
+        originalFilename: 'avatar.png',
+      };
+
+      await service.addAvatarProcessingJob(data);
+
+      expect(avatarQueue.add).toHaveBeenCalledWith(
+        'process-avatar',
+        data,
+        expect.objectContaining({
+          jobId: 'avatar-upload-1',
+          attempts: 3,
+        }),
+      );
+    });
+  });
+
+  describe('addAuditLogExportJob', () => {
+    it('should add an audit log export job', async () => {
+      const data = {
+        filters: { actor: 'admin-1' },
+        format: 'csv' as const,
+        requestedBy: 'admin-1',
+      };
+
+      await service.addAuditLogExportJob(data);
+
+      expect(auditLogExportQueue.add).toHaveBeenCalledWith(
+        'export-audit-logs',
+        data,
+        expect.objectContaining({
+          attempts: 3,
+        }),
+      );
+    });
+  });
+
   describe('getQueueStatus', () => {
     it('should return status for a valid queue', async () => {
       const status = await service.getQueueStatus(QUEUE_NAMES.NOTIFICATIONS);
@@ -147,6 +196,7 @@ describe('JobQueueService', () => {
         completed: 100,
         failed: 3,
         delayed: 1,
+        dlqSize: 3,
       });
     });
 
@@ -159,7 +209,7 @@ describe('JobQueueService', () => {
   describe('getAllQueuesStatus', () => {
     it('should return statuses for all queues', async () => {
       const statuses = await service.getAllQueuesStatus();
-      expect(statuses).toHaveLength(6);
+      expect(statuses).toHaveLength(7);
     });
   });
 

@@ -49,6 +49,14 @@ const SKIP_LOG_PATHS = new Set([
 
 const isErrorStatus = (status: number) => status >= 400;
 
+export interface DomainIdentifiers {
+  savingsId?: string;
+  proposalId?: string;
+  userId?: string;
+  referralCode?: string;
+  transactionId?: string;
+}
+
 @Injectable()
 export class RequestLoggingInterceptor implements NestInterceptor {
   constructor(
@@ -89,6 +97,8 @@ export class RequestLoggingInterceptor implements NestInterceptor {
     const userId = reqWithUser.user?.id;
     const address = reqWithUser.user?.address;
 
+    const domainIdentifiers = this.extractDomainIdentifiers(request);
+
     void this.sanitizer?.sanitizeHeaders(request.headers);
 
     this.pinoLogger.log({
@@ -100,6 +110,7 @@ export class RequestLoggingInterceptor implements NestInterceptor {
       ip,
       userId,
       address: address ? this.sanitizer?.maskAddress(address) : undefined,
+      ...domainIdentifiers,
       userAgent: request.headers['user-agent'],
       contentLength: request.headers['content-length'],
       referer: request.headers['referer'],
@@ -114,7 +125,12 @@ export class RequestLoggingInterceptor implements NestInterceptor {
         const duration = Date.now() - startTime;
         const statusCode = response.statusCode;
 
-        this.apmService?.trackHttpRequest(method, rawPath, statusCode, duration);
+        this.apmService?.trackHttpRequest(
+          method,
+          rawPath,
+          statusCode,
+          duration,
+        );
 
         const logPayload = {
           msg: `← ${method} ${url} ${statusCode} (${duration}ms)`,
@@ -125,6 +141,7 @@ export class RequestLoggingInterceptor implements NestInterceptor {
           statusCode,
           duration,
           userId,
+          ...domainIdentifiers,
         };
 
         if (isErrorStatus(statusCode)) {
@@ -138,13 +155,19 @@ export class RequestLoggingInterceptor implements NestInterceptor {
         const statusCode = error.status ?? 500;
         const isClientError = statusCode < 500;
 
-        this.apmService?.trackHttpRequest(method, rawPath, statusCode, duration);
+        this.apmService?.trackHttpRequest(
+          method,
+          rawPath,
+          statusCode,
+          duration,
+        );
         if (!isClientError) {
           this.apmService?.trackError(error, {
             route: rawPath,
             method,
             statusCode,
             userId,
+            ...domainIdentifiers,
           });
         }
 
@@ -157,6 +180,7 @@ export class RequestLoggingInterceptor implements NestInterceptor {
           statusCode,
           duration,
           userId,
+          ...domainIdentifiers,
           errorMessage: error.message,
           errorName: error.constructor?.name,
           stack: !isClientError ? error.stack : undefined,
@@ -171,5 +195,26 @@ export class RequestLoggingInterceptor implements NestInterceptor {
         return throwError(() => error);
       }),
     );
+  }
+
+  private extractDomainIdentifiers(request: Request): DomainIdentifiers {
+    const identifiers: DomainIdentifiers = {};
+    const params = (request as any).params || {};
+    const body = (request as any).body || {};
+
+    // Extract from route params
+    if (params.savingsId) identifiers.savingsId = params.savingsId;
+    if (params.proposalId) identifiers.proposalId = params.proposalId;
+    if (params.userId) identifiers.userId = params.userId;
+    if (params.referralCode) identifiers.referralCode = params.referralCode;
+    if (params.transactionId) identifiers.transactionId = params.transactionId;
+
+    // Extract from body for POST/PUT requests
+    if (body.savingsId) identifiers.savingsId = body.savingsId;
+    if (body.proposalId) identifiers.proposalId = body.proposalId;
+    if (body.referralCode) identifiers.referralCode = body.referralCode;
+    if (body.transactionId) identifiers.transactionId = body.transactionId;
+
+    return identifiers;
   }
 }
