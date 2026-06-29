@@ -132,14 +132,6 @@ export class UserController {
     description: 'Net worth breakdown',
     type: NetWorthDto,
   })
-      'Returns wallet balance, savings (flexible + locked), total, and percentage breakdown. ' +
-      'Requires a linked Stellar wallet; returns zero balances if no wallet is linked.',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Net worth data',
-    type: NetWorthDto,
-  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getNetWorth(@CurrentUser() user: { id: string }): Promise<NetWorthDto> {
     const userEntity = await this.userService.findById(user.id);

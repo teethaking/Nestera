@@ -254,17 +254,6 @@ The API supports URI-based versioning (\`/api/v1/...\` and \`/api/v2/...\`).
   logger.log(
     `Swagger v1 docs (deprecated): http://localhost:${port}/api/v1/docs`,
   );
-  logger.log(`Swagger v2 docs: http://localhost:${port}/api/v2/docs`);
-
-  const gracefulShutdown = app.get(GracefulShutdownService);
-
-  const shutdown = async (signal: string) => {
-    logger.log(`Received ${signal}, starting graceful shutdown...`);
-
-    // Stop accepting new connections
-    server.close(() => {
-      logger.log('HTTP server closed — no new connections accepted');
-    });
 
   const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT'];
   for (const signal of signals) {
@@ -280,17 +269,6 @@ The API supports URI-based versioning (\`/api/v1/...\` and \`/api/v2/...\`).
         });
     });
   }
-
-    // NestJS onApplicationShutdown hooks handle the rest:
-    // drain in-flight requests, stop workers, close DB/Redis
-    await app.close();
-
-    logger.log('Application shut down successfully');
-    process.exit(0);
-  };
-
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
 
   process.on('uncaughtException', (error) => {
     logger.error('Uncaught Exception:', error);

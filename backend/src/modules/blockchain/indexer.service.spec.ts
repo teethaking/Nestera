@@ -10,40 +10,50 @@ import { StellarService } from './stellar.service';
 import { DepositHandler } from './event-handlers/deposit.handler';
 import { WithdrawHandler } from './event-handlers/withdraw.handler';
 import { YieldHandler } from './event-handlers/yield.handler';
+import { IndexerCheckpointService } from './indexer-checkpoint.service';
+import { DistributedLockService } from '../../common/distributed-lock/distributed-lock.service';
 
 describe('IndexerService', () => {
   let service: IndexerService;
   let stellarService: StellarService;
-  let indexerStateRepo: any;
-  let savingsProductRepo: any;
+  let checkpointService: jest.Mocked<IndexerCheckpointService>;
+  let lockService: jest.Mocked<DistributedLockService>;
   let deadLetterRepo: any;
   let depositHandler: any;
-  let withdrawHandler: any;
-  let yieldHandler: any;
 
-  const mockIndexerState = {
+  const mockIndexerState: IndexerState = {
     id: 'uuid',
+    streamId: 'savings-indexer',
     lastProcessedLedger: 100,
+    lastProcessedEventCursor: null,
+    checkpointChecksum: null,
+    lastProcessedTimestamp: null,
     totalEventsProcessed: 0,
     totalEventsFailed: 0,
     updatedAt: new Date(),
   };
 
-  const mockSavingsProducts = [
-    { contractId: 'CC1', isActive: true },
-    { contractId: 'CC2', isActive: true },
-  ];
-
   beforeEach(async () => {
-    indexerStateRepo = {
-      findOne: jest.fn().mockResolvedValue(mockIndexerState),
-      save: jest.fn().mockImplementation((val) => Promise.resolve(val)),
-      create: jest.fn().mockImplementation((val) => val),
-    };
+    checkpointService = {
+      loadOrCreateState: jest.fn().mockResolvedValue({ ...mockIndexerState }),
+      persistAfterSuccessfulEvent: jest
+        .fn()
+        .mockImplementation(async (input) => ({
+          ...mockIndexerState,
+          lastProcessedLedger: input.lastProcessedLedger,
+          totalEventsProcessed: input.totalEventsProcessed,
+        })),
+      recordFailure: jest.fn(),
+      isEventProcessed: jest.fn().mockResolvedValue(false),
+    } as unknown as jest.Mocked<IndexerCheckpointService>;
 
-    savingsProductRepo = {
-      find: jest.fn().mockResolvedValue(mockSavingsProducts),
-    };
+    lockService = {
+      acquireLock: jest.fn().mockResolvedValue({
+        ownerId: 'owner',
+        release: jest.fn(),
+        renew: jest.fn(),
+      }),
+    } as unknown as jest.Mocked<DistributedLockService>;
 
     deadLetterRepo = {
       save: jest.fn().mockImplementation((val) => Promise.resolve(val)),
@@ -51,114 +61,89 @@ describe('IndexerService', () => {
     };
 
     stellarService = {
-      getRpcServer: jest.fn().mockReturnValue({
-        getEvents: jest.fn(),
-      }),
       getEvents: jest.fn(),
     } as any;
 
     depositHandler = { handle: jest.fn().mockResolvedValue(true) };
-    withdrawHandler = { handle: jest.fn().mockResolvedValue(false) };
-    yieldHandler = { handle: jest.fn().mockResolvedValue(false) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IndexerService,
-        { provide: ConfigService, useValue: { get: jest.fn() } },
-        { provide: StellarService, useValue: stellarService },
         {
-          provide: getRepositoryToken(IndexerState),
-          useValue: indexerStateRepo,
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue(25_000) },
         },
+        { provide: StellarService, useValue: stellarService },
         {
           provide: getRepositoryToken(DeadLetterEvent),
           useValue: deadLetterRepo,
         },
         {
+          provide: getRepositoryToken(IndexerState),
+          useValue: {},
+        },
+        {
           provide: getRepositoryToken(SavingsProduct),
-          useValue: savingsProductRepo,
+          useValue: {
+            find: jest
+              .fn()
+              .mockResolvedValue([{ contractId: 'CC1', isActive: true }]),
+          },
         },
         { provide: DepositHandler, useValue: depositHandler },
-        { provide: WithdrawHandler, useValue: withdrawHandler },
-        { provide: YieldHandler, useValue: yieldHandler },
+        { provide: WithdrawHandler, useValue: { handle: jest.fn() } },
+        { provide: YieldHandler, useValue: { handle: jest.fn() } },
+        { provide: IndexerCheckpointService, useValue: checkpointService },
+        { provide: DistributedLockService, useValue: lockService },
       ],
     }).compile();
 
-    service = module.get<IndexerService>(IndexerService);
-    // Suppress logger output during tests
+    service = module.get(IndexerService);
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => null);
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => null);
     jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => null);
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => null);
   });
 
-  it('should be defined', () => {
-    expect(service).toBeDefined();
+  it('skips indexer cycle when lock is unavailable', async () => {
+    lockService.acquireLock.mockResolvedValueOnce(null);
+    await service.onModuleInit();
+    await service.runIndexerCycle();
+    expect(stellarService.getEvents).not.toHaveBeenCalled();
   });
 
-  describe('onModuleInit', () => {
-    it('should initialize state and load contract IDs', async () => {
-      await service.onModuleInit();
-      expect(indexerStateRepo.findOne).toHaveBeenCalled();
-      expect(savingsProductRepo.find).toHaveBeenCalledWith({
-        where: { isActive: true },
-      });
-      expect(service.getMonitoredContracts()).toContain('CC1');
-      expect(service.getMonitoredContracts()).toContain('CC2');
-    });
+  it('processes events and persists checkpoint on success', async () => {
+    await service.onModuleInit();
+    (stellarService.getEvents as jest.Mock).mockResolvedValue([
+      {
+        id: 'evt-1',
+        ledger: '101',
+        topic: ['deposit'],
+        value: '100',
+        txHash: 'hash1',
+        contractId: 'CC1',
+      },
+    ]);
+
+    await service.runIndexerCycle();
+
+    expect(checkpointService.persistAfterSuccessfulEvent).toHaveBeenCalled();
+    expect(service.getIndexerState()?.lastProcessedLedger).toBe(101);
   });
 
-  describe('runIndexerCycle', () => {
-    beforeEach(async () => {
-      await service.onModuleInit();
-    });
+  it('deduplicates replay events already processed', async () => {
+    await service.onModuleInit();
+    checkpointService.isEventProcessed.mockResolvedValueOnce(true);
 
-    it('should fetch and process events successfully', async () => {
-      const mockEvents = [
-        {
-          id: '1',
-          ledger: '101',
-          topic: ['deposit'],
-          value: '100',
-          txHash: 'hash1',
-        },
-      ];
-      (stellarService.getEvents as jest.Mock).mockResolvedValue(mockEvents);
+    const result = await service.processEventsForReplay([
+      {
+        id: 'evt-dup',
+        ledger: 101,
+        contractId: 'CC1',
+      },
+    ]);
 
-      await service.runIndexerCycle();
-
-      expect(stellarService.getEvents).toHaveBeenCalledWith(101, [
-        'CC1',
-        'CC2',
-      ]);
-      expect(depositHandler.handle).toHaveBeenCalled();
-      expect(indexerStateRepo.save).toHaveBeenCalled();
-      expect(service.getIndexerState()?.lastProcessedLedger).toBe(101);
-    });
-
-    it('should handle failed events by logging to dead letter queue', async () => {
-      const mockEvents = [
-        {
-          id: '1',
-          ledger: '101',
-          topic: ['deposit'],
-          value: 'fail',
-          txHash: 'hash1',
-        },
-      ];
-      (stellarService.getEvents as jest.Mock).mockResolvedValue(mockEvents);
-      depositHandler.handle.mockRejectedValue(new Error('Processing failed'));
-
-      await service.runIndexerCycle();
-
-      expect(deadLetterRepo.save).toHaveBeenCalled();
-      expect(service.getIndexerState()?.totalEventsFailed).toBe(1);
-    });
-
-    it('should skip cycle if no active contracts', async () => {
-      savingsProductRepo.find.mockResolvedValue([]);
-      await service.runIndexerCycle();
-      expect(stellarService.getEvents).not.toHaveBeenCalled();
-    });
+    expect(result.skipped).toBe(1);
+    expect(result.processed).toBe(0);
   });
 });

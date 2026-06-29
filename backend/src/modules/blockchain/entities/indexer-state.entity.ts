@@ -16,11 +16,34 @@ export class IndexerState {
   id: string;
 
   /**
+   * Logical stream identifier for multi-stream checkpointing.
+   */
+  @Column({
+    type: 'varchar',
+    length: 64,
+    unique: true,
+    default: 'savings-indexer',
+  })
+  streamId: string;
+
+  /**
    * The last ledger sequence number that was successfully processed.
    * Used to fetch only new events on the next indexer cycle.
    */
   @Column({ type: 'bigint', default: 0 })
   lastProcessedLedger: number;
+
+  /**
+   * Soroban event cursor (event id) for fine-grained resume within a ledger.
+   */
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  lastProcessedEventCursor: string | null;
+
+  /**
+   * SHA-256 checksum over checkpoint fields to detect corruption.
+   */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  checkpointChecksum: string | null;
 
   /**
    * Timestamp of when the last ledger was processed.

@@ -14,6 +14,7 @@ import {
   MedicalClaim,
   ClaimStatus,
 } from '../claims/entities/medical-claim.entity';
+import { DistributedLockService } from '../../common/distributed-lock/distributed-lock.service';
 
 interface ContractEvent {
   id: string;
@@ -38,6 +39,7 @@ export class StellarEventListenerService
   private lastProcessedCursor: string | null = null;
   private readonly pollIntervalMs: number;
   private readonly contractId: string;
+  private readonly lockTtlMs: number;
 
   constructor(
     private readonly stellarService: StellarService,
@@ -46,12 +48,17 @@ export class StellarEventListenerService
     private readonly processedEventRepository: Repository<ProcessedStellarEvent>,
     @InjectRepository(MedicalClaim)
     private readonly claimRepository: Repository<MedicalClaim>,
+    private readonly lockService: DistributedLockService,
   ) {
     this.contractId =
       this.configService.get<string>('stellar.contractId') || '';
     this.pollIntervalMs = this.configService.get<number>(
       'stellar.eventPollInterval',
       10000,
+    );
+    this.lockTtlMs = this.configService.get<number>(
+      'distributedLock.indexerTtlMs',
+      25_000,
     );
   }
 
@@ -122,6 +129,15 @@ export class StellarEventListenerService
   private async pollEvents(): Promise<void> {
     if (!this.isRunning) return;
 
+    const lock = await this.lockService.acquireLock(
+      `indexer:stream:claims:${this.contractId}`,
+      { ttlMs: this.lockTtlMs },
+    );
+    if (!lock) {
+      this.logger.debug('Claims event poll skipped: lock held by another instance');
+      return;
+    }
+
     try {
       const rpcServer = this.stellarService.getRpcServer();
 
@@ -156,6 +172,8 @@ export class StellarEventListenerService
       }
     } catch (error) {
       this.logger.error('Error polling events', error);
+    } finally {
+      await lock.release();
     }
   }
 
@@ -175,7 +193,6 @@ export class StellarEventListenerService
         this.logger.debug(`Event ${eventId} already processed, skipping`);
         return;
       }
-
 
       // Parse event topics and value
       const topics = event.topic.map((topic) => topic.toXDR('base64'));

@@ -92,8 +92,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
     const requestId =
       ((request as unknown as Record<string, unknown>).correlationId as
-        | string
-        | undefined) ??
+        string | undefined) ??
       (request.headers['x-correlation-id'] as string) ??
       null;
     const timestamp = new Date().toISOString();
@@ -130,11 +129,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const body: StandardErrorResponse = {
         success: false,
         statusCode: httpStatus,
-        correlationId: (request as Request & { correlationId?: string })
-          .correlationId,
-        errorCode: isTimeout ? 'SOROBAN_RPC_TIMEOUT' : 'SOROBAN_RPC_EXHAUSTED',
-        timestamp: new Date().toISOString(),
-        path: request.url,
         errorCode,
         message: isTimeout
           ? 'Soroban RPC request timed out. The network may be under load.'
@@ -156,12 +150,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (isDatabaseConnectionError(exception)) {
       const body: StandardErrorResponse = {
         success: false,
-        statusCode,
-        correlationId: (request as Request & { correlationId?: string })
-          .correlationId,
-        errorCode: 'DB_CONNECTION_ERROR',
-        timestamp: new Date().toISOString(),
-        path: request.url,
         statusCode: HttpStatus.SERVICE_UNAVAILABLE,
         errorCode: ErrorCode.DB_CONNECTION_ERROR,
         message:
@@ -226,11 +214,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const body: StandardErrorResponse = {
       success: false,
       statusCode: status,
-      correlationId:
-        (request as Request & { correlationId?: string }).correlationId ??
-        request.headers['x-correlation-id'] ??
-        undefined,
-      timestamp: new Date().toISOString(),
       errorCode,
       message,
       details,
@@ -243,11 +226,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     response.status(status).json(body);
   }
 
-  private logError(
-    request: Request,
-    status: number,
-    exception: unknown,
-  ): void {
+  private logError(request: Request, status: number, exception: unknown): void {
     const msg =
       exception instanceof Error ? exception.message : String(exception);
     const stack = exception instanceof Error ? exception.stack : undefined;

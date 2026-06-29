@@ -9,8 +9,10 @@ import { LogSanitizerService } from './services/log-sanitizer.service';
 import { CompressionMetricsService } from './services/compression-metrics.service';
 import { CompressionMetricsMiddleware } from './middleware/compression.middleware';
 import { AuditLogService } from './services/audit-log.service';
-import { AuditLog } from './entities/audit-log.entity';
 import { CacheModule } from '../modules/cache/cache.module';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditLog } from './entities/audit-log.entity';
+import { DistributedLockModule } from './distributed-lock/distributed-lock.module';
 
 @Global()
 @Module({
@@ -34,6 +36,7 @@ import { CacheModule } from '../modules/cache/cache.module';
     LogSanitizerService,
     CompressionMetricsService,
     AuditLogService,
+    DistributedLockModule,
   ],
 })
 export class CommonModule {}

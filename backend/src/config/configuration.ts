@@ -194,4 +194,57 @@ export default () => ({
       10,
     ),
   },
+  distributedLock: {
+    defaultTtlMs: parseInt(process.env.DISTRIBUTED_LOCK_TTL_MS || '30000', 10),
+    renewalIntervalMs: parseInt(
+      process.env.DISTRIBUTED_LOCK_RENEWAL_MS || '10000',
+      10,
+    ),
+    indexerTtlMs: parseInt(process.env.INDEXER_LOCK_TTL_MS || '25000', 10),
+    replayTtlMs: parseInt(process.env.REPLAY_LOCK_TTL_MS || '120000', 10),
+  },
+  blockchainReplay: {
+    maxLedgerRange: parseInt(
+      process.env.BLOCKCHAIN_REPLAY_MAX_LEDGER_RANGE || '10000',
+      10,
+    ),
+  },
+  referralFraud: {
+    creationRateWindowMs: parseInt(
+      process.env.REFERRAL_FRAUD_CREATION_WINDOW_MS || '3600000',
+      10,
+    ),
+    maxCreationAttemptsPerWindow: parseInt(
+      process.env.REFERRAL_FRAUD_MAX_CREATION_ATTEMPTS || '20',
+      10,
+    ),
+    similarMetadataWindowMs: parseInt(
+      process.env.REFERRAL_FRAUD_SIMILAR_METADATA_WINDOW_MS || '604800000',
+      10,
+    ),
+    similarMetadataThreshold: parseInt(
+      process.env.REFERRAL_FRAUD_SIMILAR_METADATA_THRESHOLD || '2',
+      10,
+    ),
+    signupPatternWindowMs: parseInt(
+      process.env.REFERRAL_FRAUD_SIGNUP_WINDOW_MS || '86400000',
+      10,
+    ),
+    signupPatternThreshold: parseInt(
+      process.env.REFERRAL_FRAUD_SIGNUP_THRESHOLD || '5',
+      10,
+    ),
+    excessiveCreationWindowMs: parseInt(
+      process.env.REFERRAL_FRAUD_EXCESSIVE_WINDOW_MS || '86400000',
+      10,
+    ),
+    excessiveCreationThreshold: parseInt(
+      process.env.REFERRAL_FRAUD_EXCESSIVE_THRESHOLD || '10',
+      10,
+    ),
+    suspiciousWithdrawalWindowMs: parseInt(
+      process.env.REFERRAL_FRAUD_WITHDRAWAL_WINDOW_MS || '3600000',
+      10,
+    ),
+  },
 });

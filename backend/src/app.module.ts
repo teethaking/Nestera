@@ -281,7 +281,7 @@ const envValidationSchema = Joi.object({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        redis: config.get<string>('REDIS_URL') || 'redis://localhost:6379',
+        url: config.get<string>('redis.url') || 'redis://localhost:6379',
       }),
     }),
     EventEmitterModule.forRoot(),

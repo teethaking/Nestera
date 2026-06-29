@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { DataSource } from 'typeorm';
 import { GracefulShutdownService } from './graceful-shutdown.service';
 
 describe('GracefulShutdownService', () => {
@@ -30,7 +31,7 @@ describe('GracefulShutdownService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GracefulShutdownService,
-        { provide: 'DataSource', useValue: mockDataSource },
+        { provide: DataSource, useValue: mockDataSource },
         { provide: CACHE_MANAGER, useValue: mockCacheManager },
         { provide: SchedulerRegistry, useValue: mockSchedulerRegistry },
       ],
@@ -110,44 +111,14 @@ describe('GracefulShutdownService', () => {
     await service.onApplicationShutdown('SIGTERM');
     service.incrementActiveRequests();
     expect(service.getActiveRequestCount()).toBe(0);
-  const createService = () => {
-    jest.useFakeTimers();
-
-    const dataSource = {
-      isInitialized: true,
-      destroy: jest.fn().mockResolvedValue(undefined),
-    } as const;
-
-    const schedulerRegistry = {
-      getCronJobs: jest
-        .fn()
-        .mockReturnValue(new Map([['heartbeat', { stop: jest.fn() }]])),
-      getIntervals: jest.fn().mockReturnValue(['metrics']),
-      getInterval: jest
-        .fn()
-        .mockReturnValue(setInterval(() => undefined, 1_000)),
-      deleteInterval: jest.fn(),
-      getTimeouts: jest.fn().mockReturnValue(['reconnect']),
-      getTimeout: jest.fn().mockReturnValue(setTimeout(() => undefined, 1_000)),
-      deleteTimeout: jest.fn(),
-    } as unknown as SchedulerRegistry;
-
-    const service = new GracefulShutdownService(
-      dataSource as never,
-      undefined,
-      schedulerRegistry,
-    );
-
-    return { dataSource, schedulerRegistry, service };
-  };
-
-  afterEach(() => {
-    jest.useRealTimers();
-    jest.clearAllMocks();
   });
 
   it('tracks background tasks while they are running', async () => {
-    const { service } = createService();
+    const trackedService = new GracefulShutdownService(
+      mockDataSource,
+      mockCacheManager,
+      mockSchedulerRegistry,
+    );
 
     let releaseTask!: () => void;
     const runningTask = GracefulShutdownService.runTrackedTask(
@@ -158,38 +129,55 @@ describe('GracefulShutdownService', () => {
         }),
     );
 
-    expect(service.getActiveBackgroundTaskCount()).toBe(1);
+    expect(trackedService.getActiveBackgroundTaskCount()).toBe(1);
 
     releaseTask();
     await runningTask;
 
-    expect(service.getActiveBackgroundTaskCount()).toBe(0);
+    expect(trackedService.getActiveBackgroundTaskCount()).toBe(0);
   });
 
   it('skips new background tasks after shutdown starts', async () => {
-    const { service } = createService();
+    const trackedService = new GracefulShutdownService(
+      mockDataSource,
+      mockCacheManager,
+      mockSchedulerRegistry,
+    );
     const task = jest.fn();
 
-    service.beginShutdown('SIGTERM');
+    trackedService.beginShutdown('SIGTERM');
     await GracefulShutdownService.runTrackedTask('spec.task', task);
 
     expect(task).not.toHaveBeenCalled();
   });
 
   it('stops schedulers and closes the database during shutdown', async () => {
-    const { dataSource, schedulerRegistry, service } = createService();
+    const cronStop = jest.fn();
+    const schedulerRegistry = {
+      getCronJobs: jest
+        .fn()
+        .mockReturnValue(new Map([['heartbeat', { stop: cronStop }]])),
+      getIntervals: jest.fn().mockReturnValue(['metrics']),
+      getInterval: jest
+        .fn()
+        .mockReturnValue(setInterval(() => undefined, 1_000)),
+      deleteInterval: jest.fn(),
+      getTimeouts: jest.fn().mockReturnValue(['reconnect']),
+      getTimeout: jest.fn().mockReturnValue(setTimeout(() => undefined, 1_000)),
+      deleteTimeout: jest.fn(),
+    } as unknown as SchedulerRegistry;
 
-    await service.beforeApplicationShutdown('SIGTERM');
+    const trackedService = new GracefulShutdownService(
+      mockDataSource,
+      undefined,
+      schedulerRegistry,
+    );
 
-    const cronJobs = schedulerRegistry.getCronJobs() as unknown as Map<
-      string,
-      { stop: jest.Mock }
-    >;
-    const heartbeatJob = cronJobs.get('heartbeat');
+    await trackedService.beforeApplicationShutdown('SIGTERM');
 
-    expect(heartbeatJob?.stop).toHaveBeenCalled();
+    expect(cronStop).toHaveBeenCalled();
     expect(schedulerRegistry.deleteInterval).toHaveBeenCalledWith('metrics');
     expect(schedulerRegistry.deleteTimeout).toHaveBeenCalledWith('reconnect');
-    expect(dataSource.destroy).toHaveBeenCalled();
+    expect(mockDataSource.destroy).toHaveBeenCalled();
   });
 });

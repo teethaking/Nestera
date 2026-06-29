@@ -180,18 +180,31 @@ export class StellarService implements OnModuleInit {
     }
   }
 
-  async getEvents(startLedger: number, contractIds: string[]): Promise<any[]> {
+  async getEvents(
+    startLedger: number,
+    contractIds: string[],
+    options: { endLedger?: number; cursor?: string } = {},
+  ): Promise<any[]> {
     try {
       return await this.rpcClient.executeWithRetry(async (client) => {
         const rpcServer = client as rpc.Server;
-        const response = await rpcServer.getEvents({
+        const request: Record<string, unknown> = {
           startLedger,
           filters: [
             {
               contractIds,
             },
           ],
-        });
+        };
+
+        if (options.endLedger !== undefined) {
+          request.endLedger = options.endLedger;
+        }
+        if (options.cursor) {
+          request.cursor = options.cursor;
+        }
+
+        const response = await rpcServer.getEvents(request as any);
         return response.events || [];
       }, 'rpc');
     } catch (error) {

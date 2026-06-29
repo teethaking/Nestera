@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { rpc } from '@stellar/stellar-sdk';
 import { DeadLetterEvent } from './entities/dead-letter-event.entity';
 import { IndexerState } from './entities/indexer-state.entity';
 import { DepositHandler } from './event-handlers/deposit.handler';
@@ -12,14 +11,18 @@ import { YieldHandler } from './event-handlers/yield.handler';
 import { StellarService } from './stellar.service';
 import { SavingsProduct } from '../savings/entities/savings-product.entity';
 import { ShutdownTrackedTask } from '../../common/decorators/shutdown-task.decorator';
+import { IndexerCheckpointService } from './indexer-checkpoint.service';
+import { DistributedLockService } from '../../common/distributed-lock/distributed-lock.service';
+import { INDEXER_STREAM_SAVINGS } from './indexer-checkpoint.utils';
 
 /** Shape of a raw Soroban event as returned by the RPC. */
-interface SorobanEvent {
+export interface SorobanEvent {
   id?: string;
   ledger: number;
   topic?: unknown[];
   value?: unknown;
   txHash?: string;
+  contractId?: string;
   [key: string]: unknown;
 }
 
@@ -27,13 +30,10 @@ interface SorobanEvent {
 export class IndexerService implements OnModuleInit {
   private readonly logger = new Logger(IndexerService.name);
 
-  private rpcServer: rpc.Server | null = null;
-
-  /** In-memory cache of contract IDs to monitor */
-  private contractIds: Set<string> = new Set();
-
-  /** In-memory state synced with DB */
+  private readonly contractIds: Set<string> = new Set();
   private indexerState: IndexerState | null = null;
+  private readonly streamId = INDEXER_STREAM_SAVINGS;
+  private readonly lockTtlMs: number;
 
   constructor(
     private readonly configService: ConfigService,
@@ -47,16 +47,19 @@ export class IndexerService implements OnModuleInit {
     private readonly depositHandler: DepositHandler,
     private readonly withdrawHandler: WithdrawHandler,
     private readonly yieldHandler: YieldHandler,
-  ) {}
+    private readonly checkpointService: IndexerCheckpointService,
+    private readonly lockService: DistributedLockService,
+  ) {
+    this.lockTtlMs = this.configService.get<number>(
+      'distributedLock.indexerTtlMs',
+      25_000,
+    );
+  }
 
   async onModuleInit() {
     this.logger.log('Initializing Blockchain Event Indexer...');
-
-    this.rpcServer = this.stellarService.getRpcServer();
-
     await this.initializeIndexerState();
     await this.loadContractIds();
-
     this.logger.log(
       `Blockchain indexer initialized. Monitoring ${this.contractIds.size} contract(s).`,
     );
@@ -67,16 +70,23 @@ export class IndexerService implements OnModuleInit {
   async runIndexerCycle(): Promise<void> {
     if (!this.indexerState) return;
 
-    // Reload contract IDs to ensure we're watching any new active products
-    await this.loadContractIds();
-    if (this.contractIds.size === 0) {
-      this.logger.debug('No active contracts to monitor');
+    const lock = await this.lockService.acquireLock(
+      `indexer:stream:${this.streamId}`,
+      { ttlMs: this.lockTtlMs },
+    );
+    if (!lock) {
+      this.logger.debug('Indexer cycle skipped: lock held by another instance');
       return;
     }
 
     try {
-      const events = await this.fetchEvents();
+      await this.loadContractIds();
+      if (this.contractIds.size === 0) {
+        this.logger.debug('No active contracts to monitor');
+        return;
+      }
 
+      const events = await this.fetchEvents();
       if (events.length === 0) {
         this.logger.debug('No new events found');
         return;
@@ -97,32 +107,80 @@ export class IndexerService implements OnModuleInit {
       this.logger.log(
         `Processed ${processed} events (Failed: ${failed}) from ledger ${events[0].ledger} to ${events[events.length - 1].ledger}`,
       );
-
-      this.indexerState.totalEventsProcessed += processed;
-      this.indexerState.totalEventsFailed += failed;
-      this.indexerState.updatedAt = new Date();
-
-      await this.saveIndexerState();
     } catch (err) {
       this.logger.error(`Indexer cycle failed: ${(err as Error).message}`);
+    } finally {
+      await lock.release();
     }
   }
 
-  private async initializeIndexerState() {
-    let state = await this.indexerStateRepo.findOne({ where: {} });
+  /**
+   * Process events for replay or manual catch-up. Caller must hold replay lock.
+   */
+  async processEventsForReplay(
+    events: SorobanEvent[],
+    options: { skipCheckpoint?: boolean } = {},
+  ): Promise<{ processed: number; failed: number; skipped: number }> {
+    let processed = 0;
+    let failed = 0;
+    let skipped = 0;
 
-    if (!state) {
-      state = await this.indexerStateRepo.save(
-        this.indexerStateRepo.create({
-          lastProcessedLedger: 0,
-          lastProcessedTimestamp: null,
-          totalEventsProcessed: 0,
-          totalEventsFailed: 0,
-        }),
-      );
+    for (const event of events) {
+      const contractId = event.contractId ?? 'unknown';
+      if (event.id) {
+        const alreadyProcessed = await this.checkpointService.isEventProcessed(
+          contractId,
+          event.id,
+        );
+        if (alreadyProcessed) {
+          skipped++;
+          continue;
+        }
+      }
+
+      const ok = await this.processEvent(event, options.skipCheckpoint);
+      if (ok) {
+        processed++;
+      } else {
+        failed++;
+      }
     }
 
-    this.indexerState = state;
+    return { processed, failed, skipped };
+  }
+
+  async fetchEventsFromRange(
+    startLedger: number,
+    endLedger?: number,
+    cursor?: string | null,
+  ): Promise<SorobanEvent[]> {
+    const rpcEvents = await this.stellarService.getEvents(
+      startLedger,
+      Array.from(this.contractIds),
+      { endLedger, cursor: cursor ?? undefined },
+    );
+
+    return rpcEvents
+      .map((e) => ({
+        id: e.id,
+        ledger: parseInt(e.ledger, 10),
+        topic: e.topic,
+        value: e.value,
+        txHash: e.txHash,
+        contractId: e.contractId,
+      }))
+      .sort((a, b) => {
+        if (a.ledger !== b.ledger) {
+          return a.ledger - b.ledger;
+        }
+        return (a.id ?? '').localeCompare(b.id ?? '');
+      });
+  }
+
+  private async initializeIndexerState() {
+    this.indexerState = await this.checkpointService.loadOrCreateState(
+      this.streamId,
+    );
   }
 
   private async loadContractIds() {
@@ -135,32 +193,44 @@ export class IndexerService implements OnModuleInit {
       if (p.contractId) newSet.add(p.contractId);
     }
 
-    this.contractIds = newSet;
-  }
-
-  private async saveIndexerState() {
-    if (this.indexerState) {
-      await this.indexerStateRepo.save(this.indexerState);
+    this.contractIds.clear();
+    for (const id of newSet) {
+      this.contractIds.add(id);
     }
   }
 
-  private async processEvent(event: SorobanEvent): Promise<boolean> {
+  private async processEvent(
+    event: SorobanEvent,
+    skipCheckpoint = false,
+  ): Promise<boolean> {
     try {
       await this.handleEvent(event);
 
-      if (
-        this.indexerState &&
-        event.ledger > this.indexerState.lastProcessedLedger
-      ) {
-        this.indexerState.lastProcessedLedger = event.ledger;
-        this.indexerState.lastProcessedTimestamp = Date.now();
+      if (!skipCheckpoint && this.indexerState) {
+        this.indexerState =
+          await this.checkpointService.persistAfterSuccessfulEvent({
+            streamId: this.streamId,
+            lastProcessedLedger: event.ledger,
+            lastProcessedEventCursor: event.id ?? null,
+            totalEventsProcessed:
+              Number(this.indexerState.totalEventsProcessed) + 1,
+            totalEventsFailed: Number(this.indexerState.totalEventsFailed),
+            eventId: event.id,
+            contractId: event.contractId ?? 'unknown',
+            transactionHash: event.txHash,
+            eventType: this.resolveEventType(event),
+            eventData: {
+              topic: event.topic,
+              value: event.value,
+            },
+          });
       }
 
       return true;
     } catch (err) {
       const msg = (err as Error).message;
       this.logger.error(
-        `FAILURE at Ledger ${event.ledger}: Processing of event ${event.id} crashed. JSON: ${JSON.stringify(event)}. Error: ${msg}`,
+        `FAILURE at Ledger ${event.ledger}: Processing of event ${event.id} crashed. Error: ${msg}`,
       );
 
       await this.dlqRepo.save(
@@ -170,6 +240,12 @@ export class IndexerService implements OnModuleInit {
           errorMessage: msg,
         }),
       );
+
+      await this.checkpointService.recordFailure(this.streamId);
+      if (this.indexerState) {
+        this.indexerState.totalEventsFailed =
+          Number(this.indexerState.totalEventsFailed) + 1;
+      }
 
       return false;
     }
@@ -186,20 +262,19 @@ export class IndexerService implements OnModuleInit {
   private async fetchEvents(): Promise<SorobanEvent[]> {
     if (!this.indexerState) return [];
 
-    const rpcEvents = await this.stellarService.getEvents(
-      this.indexerState.lastProcessedLedger + 1,
-      Array.from(this.contractIds),
+    return this.fetchEventsFromRange(
+      Number(this.indexerState.lastProcessedLedger) + 1,
+      undefined,
+      this.indexerState.lastProcessedEventCursor,
     );
+  }
 
-    return rpcEvents
-      .map((e) => ({
-        id: e.id,
-        ledger: parseInt(e.ledger, 10),
-        topic: e.topic,
-        value: e.value,
-        txHash: e.txHash,
-      }))
-      .sort((a, b) => a.ledger - b.ledger);
+  private resolveEventType(event: SorobanEvent): string {
+    const topic = event.topic?.[0];
+    if (typeof topic === 'string') {
+      return topic;
+    }
+    return 'unknown';
   }
 
   getIndexerState() {
@@ -216,5 +291,11 @@ export class IndexerService implements OnModuleInit {
 
   getMonitoredContracts(): string[] {
     return Array.from(this.contractIds);
+  }
+
+  async refreshState(): Promise<void> {
+    this.indexerState = await this.checkpointService.loadOrCreateState(
+      this.streamId,
+    );
   }
 }
