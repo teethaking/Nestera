@@ -5,10 +5,17 @@ import {
   HttpStatus,
   Query,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Response } from 'express';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { Role } from '../../common/enums/role.enum';
+import { HealthHistoryQueryDto } from './dto/health-history-query.dto';
+import { HealthCollectorService } from './health-collector.service';
 import { TypeOrmHealthIndicator } from './indicators/typeorm.health';
 import { IndexerHealthIndicator } from './indicators/indexer.health';
 import { RpcHealthIndicator } from './indicators/rpc.health';
@@ -39,6 +46,7 @@ export class HealthController {
     private readonly storage: StorageHealthIndicator,
     private readonly system: SystemHealthIndicator,
     private readonly healthHistory: HealthHistoryService,
+    private readonly healthCollector: HealthCollectorService,
   ) {}
 
   @Get()
@@ -164,6 +172,34 @@ export class HealthController {
     const totalTime = Date.now() - startTime;
     const score = Math.round((healthyCount / services.length) * 100);
     const allHealthy = healthyCount === services.length;
+    const timestamp = new Date();
+
+    const historyEntries = checks.map((check, index) => {
+      const service = services[index];
+      if (check.status === 'fulfilled') {
+        const entry = check.value[service] as Record<string, unknown> | undefined;
+        const status = (entry?.status as string) ?? 'up';
+        return {
+          service,
+          status: (status === 'up' ? 'up' : status === 'degraded' ? 'degraded' : 'down') as
+            | 'up'
+            | 'down'
+            | 'degraded',
+          responseTime: parseInt(String(entry?.responseTime ?? '0'), 10) || 0,
+          timestamp,
+          error: entry?.message as string | undefined,
+        };
+      }
+      return {
+        service,
+        status: 'down' as const,
+        responseTime: 0,
+        timestamp,
+        error: check.reason?.message || 'Unknown error',
+      };
+    });
+
+    await this.healthHistory.recordChecks(historyEntries);
 
     return {
       status: allHealthy ? 'ok' : score > 70 ? 'degraded' : 'error',
@@ -284,13 +320,15 @@ export class HealthController {
     summary: 'Get health check history',
     description: 'Retrieve historical health check data',
   })
-  getHistory(
-    @Query('service') service?: string,
-    @Query('limit') limit: number = 100,
-  ) {
-    return {
-      history: this.healthHistory.getHistory(service, limit),
-    };
+  async getHistory(@Query() query: HealthHistoryQueryDto) {
+    const history = await this.healthHistory.getHistory({
+      service: query.service,
+      limit: query.limit,
+      from: query.from ? new Date(query.from) : undefined,
+      to: query.to ? new Date(query.to) : undefined,
+    });
+
+    return { history, count: history.length };
   }
 
   @Get('stats')
@@ -299,7 +337,21 @@ export class HealthController {
     summary: 'Get health statistics',
     description: 'Get uptime and performance statistics for all services',
   })
-  getStats() {
+  async getStats() {
     return this.healthHistory.getAllStats();
+  }
+
+  @Get('admin/visualization')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Admin health history visualization data',
+    description:
+      'Returns time-series health data for admin dashboards (last N hours)',
+  })
+  async getAdminVisualization(@Query('hours') hours: number = 24) {
+    return this.healthHistory.getVisualizationData(Number(hours) || 24);
   }
 }

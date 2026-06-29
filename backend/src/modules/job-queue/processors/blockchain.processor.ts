@@ -4,7 +4,7 @@ import { Job } from 'bullmq';
 import { QUEUE_NAMES } from '../job-queue.constants';
 import { BlockchainJobData } from '../job-queue.service';
 
-@Processor(QUEUE_NAMES.BLOCKCHAIN)
+@Processor(QUEUE_NAMES.BLOCKCHAIN, { concurrency: 5 })
 export class BlockchainProcessor extends WorkerHost {
   private readonly logger = new Logger(BlockchainProcessor.name);
 

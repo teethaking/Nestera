@@ -15,16 +15,20 @@ import {
 import { StorageHealthIndicator } from './indicators/storage.health';
 import { SystemHealthIndicator } from './indicators/system.health';
 import { HealthHistoryService } from './health-history.service';
+import { HealthCollectorService } from './health-collector.service';
+import { HealthCheckRecord } from './entities/health-check-record.entity';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { ConnectionPoolModule } from '../../common/database/connection-pool.module';
 import { DeadLetterEvent } from '../blockchain/entities/dead-letter-event.entity';
+import { AuthModule } from '../../auth/auth.module';
 
 @Module({
   imports: [
     TerminusModule,
-    TypeOrmModule.forFeature([DeadLetterEvent]),
+    TypeOrmModule.forFeature([DeadLetterEvent, HealthCheckRecord]),
     BlockchainModule,
     ConnectionPoolModule,
+    AuthModule,
   ],
   controllers: [HealthController],
   providers: [
@@ -39,7 +43,8 @@ import { DeadLetterEvent } from '../blockchain/entities/dead-letter-event.entity
     StorageHealthIndicator,
     SystemHealthIndicator,
     HealthHistoryService,
+    HealthCollectorService,
   ],
-  exports: [HealthHistoryService],
+  exports: [HealthHistoryService, HealthCollectorService],
 })
 export class HealthModule {}

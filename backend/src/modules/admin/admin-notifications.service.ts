@@ -1,6 +1,6 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   Notification,
@@ -11,25 +11,23 @@ import {
   UserSubscription,
   SubscriptionStatus,
 } from '../savings/entities/user-subscription.entity';
-import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bullmq';
-import { MailService } from '../mail/mail.service';
+import { JobQueueService } from '../job-queue/job-queue.service';
+import { ConfigService } from '@nestjs/config';
 import { ShutdownTrackedTask } from '../../common/decorators/shutdown-task.decorator';
+import { AdminNotificationRateLimiterService } from './admin-notification-rate-limiter.service';
 import {
   BroadcastNotificationDto,
   ScheduleNotificationDto,
   PreviewNotificationDto,
   NotificationFilterDto,
-  NotificationDeliveryDto,
   NotificationChannel,
+  NotificationDeliveryDto,
 } from './dto/admin-notification.dto';
-
-// Use a custom notification type string since ADMIN_BROADCAST doesn't exist
-const ADMIN_BROADCAST_TYPE = 'ADMIN_BROADCAST' as any;
 
 @Injectable()
 export class AdminNotificationsService {
   private readonly logger = new Logger(AdminNotificationsService.name);
+  private readonly batchSize: number;
 
   constructor(
     @InjectRepository(Notification)
@@ -38,18 +36,47 @@ export class AdminNotificationsService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(UserSubscription)
     private readonly subscriptionRepository: Repository<UserSubscription>,
-    @InjectQueue('notifications')
-    private readonly notificationQueue: Queue,
-    private readonly mailService: MailService,
-  ) {}
+    private readonly jobQueueService: JobQueueService,
+    private readonly rateLimiter: AdminNotificationRateLimiterService,
+    private readonly configService: ConfigService,
+  ) {
+    this.batchSize = this.configService.get<number>(
+      'adminNotifications.batchSize',
+      50,
+    );
+  }
 
-  /**
-   * Send broadcast notification to all users or targeted users via job queue
-   */
   async broadcastNotification(
     dto: BroadcastNotificationDto,
   ): Promise<NotificationDeliveryDto> {
+    const validation = this.rateLimiter.validateBroadcastConfig(
+      dto.title,
+      dto.message,
+      dto.channels,
+    );
+    if (!validation.valid) {
+      throw new BadRequestException(validation.error);
+    }
+
     const targetUsers = await this.getTargetUsers(dto.target);
+    const channels = dto.channels || [NotificationChannel.IN_APP];
+    const targetKey = JSON.stringify(dto.target ?? { all: true });
+
+    if (this.rateLimiter.isDuplicate(dto.title, dto.message, targetKey)) {
+      throw new ConflictException(
+        'Duplicate notification blocked within deduplication window',
+      );
+    }
+
+    for (const channel of channels) {
+      const rateCheck = this.rateLimiter.checkRateLimit(
+        channel,
+        targetUsers.length,
+      );
+      if (!rateCheck.allowed) {
+        throw new BadRequestException(rateCheck.reason);
+      }
+    }
 
     const delivery: NotificationDeliveryDto = {
       sent: 0,
@@ -58,104 +85,108 @@ export class AdminNotificationsService {
       failed: 0,
     };
 
-    const channels = dto.channels || [NotificationChannel.IN_APP];
+    for (let i = 0; i < targetUsers.length; i += this.batchSize) {
+      const batch = targetUsers.slice(i, i + this.batchSize);
 
-    for (const user of targetUsers) {
-      delivery.sent++;
+      for (const user of batch) {
+        delivery.sent++;
 
-      try {
-        // Create in-app notification
-        if (channels.includes(NotificationChannel.IN_APP)) {
-          const notification = this.notificationRepository.create({
-            userId: user.id,
-            type: ADMIN_BROADCAST_TYPE,
-            title: dto.title,
-            message: dto.message,
-            metadata: {
-              channels,
-              broadcast: true,
-            },
-          });
-          await this.notificationRepository.save(notification);
+        try {
+          for (const channel of channels) {
+            if (channel === NotificationChannel.IN_APP) {
+              await this.jobQueueService.addNotificationJob(
+                {
+                  userId: user.id,
+                  type: NotificationType.ADMIN_BROADCAST,
+                  title: dto.title,
+                  message: dto.message,
+                  metadata: { channels, broadcast: true, channel },
+                },
+                { delay: Math.floor(i / this.batchSize) * 1000 },
+              );
+            } else if (channel === NotificationChannel.EMAIL && user.email) {
+              await this.jobQueueService.addEmailJob(
+                {
+                  to: user.email,
+                  subject: dto.title,
+                  template: 'raw',
+                  context: { body: dto.message },
+                },
+                { delay: Math.floor(i / this.batchSize) * 1000 },
+              );
+            }
+          }
           delivery.delivered++;
-        }
-
-        // Send email
-        if (channels.includes(NotificationChannel.EMAIL) && user.email) {
-          await this.mailService.sendRawMail(
-            user.email,
-            dto.title,
-            dto.message,
+        } catch (error) {
+          this.logger.error(
+            `Failed to queue notification for user ${user.id}: ${(error as Error).message}`,
           );
-          delivery.delivered++;
+          delivery.failed++;
         }
-
-        // Push notification (placeholder - would integrate with FCM/APNs)
-        if (channels.includes(NotificationChannel.PUSH)) {
-          // TODO: Implement push notification integration
-          delivery.delivered++;
-        }
-      } catch (error) {
-        this.logger.error(
-          `Failed to send notification to user ${user.id}: ${error.message}`,
-        );
-        delivery.failed++;
       }
     }
 
     this.logger.log(
-      `Broadcast notification sent: ${delivery.sent} sent, ${delivery.delivered} delivered, ${delivery.failed} failed`,
+      `Broadcast queued: ${delivery.sent} sent, ${delivery.delivered} queued, ${delivery.failed} failed`,
     );
     return delivery;
   }
 
-  /**
-   * Schedule a notification for future delivery
-   */
   async scheduleNotification(
     dto: ScheduleNotificationDto,
   ): Promise<{ scheduleId: string }> {
-    const scheduledAt = new Date(dto.scheduledAt);
+    const validation = this.rateLimiter.validateScheduleConfig(
+      dto.scheduledAt,
+      dto.timezone,
+    );
+    if (!validation.valid) {
+      throw new BadRequestException(validation.error);
+    }
 
-    // Create a scheduled notification record
+    const broadcastValidation = this.rateLimiter.validateBroadcastConfig(
+      dto.title,
+      dto.message,
+      dto.channels,
+    );
+    if (!broadcastValidation.valid) {
+      throw new BadRequestException(broadcastValidation.error);
+    }
+
+    const scheduledAt = new Date(dto.scheduledAt);
     const notification = this.notificationRepository.create({
-      userId: 'SYSTEM', // System-wide
+      userId: 'SYSTEM',
       type: NotificationType.ADMIN_BROADCAST,
       title: dto.title,
       message: dto.message,
       metadata: {
         scheduled: true,
+        processed: false,
         scheduledAt: scheduledAt.toISOString(),
         target: dto.target,
         channels: dto.channels || [NotificationChannel.IN_APP],
+        timezone: dto.timezone,
       },
     });
 
     await this.notificationRepository.save(notification);
-
-    // In production, use a job scheduler like Bull/BullMQ
-    // For now, we'll handle it in the scheduled job
     this.logger.log(`Notification scheduled for ${scheduledAt.toISOString()}`);
 
     return { scheduleId: notification.id };
   }
 
-  /**
-   * Cancel a scheduled notification
-   */
   async cancelScheduledNotification(scheduleId: string): Promise<void> {
     const notification = await this.notificationRepository.findOne({
       where: { id: scheduleId },
     });
 
     if (!notification) {
-      throw new NotFoundException(
+      throw new BadRequestException(
         `Scheduled notification ${scheduleId} not found`,
       );
     }
 
     if (!notification.metadata?.scheduled) {
-      throw new NotFoundException(
+      throw new BadRequestException(
         `Notification ${scheduleId} is not a scheduled notification`,
       );
     }
@@ -164,9 +195,6 @@ export class AdminNotificationsService {
     this.logger.log(`Scheduled notification ${scheduleId} cancelled`);
   }
 
-  /**
-   * Preview notification - shows sample recipients
-   */
   async previewNotification(dto: PreviewNotificationDto): Promise<{
     previewUsers: { id: string; email: string; name: string }[];
     estimatedRecipients: number;
@@ -186,9 +214,6 @@ export class AdminNotificationsService {
     };
   }
 
-  /**
-   * Get notification broadcast history
-   */
   async getNotificationHistory(filter: NotificationFilterDto): Promise<{
     notifications: Notification[];
     total: number;
@@ -201,7 +226,9 @@ export class AdminNotificationsService {
 
     const query = this.notificationRepository
       .createQueryBuilder('notification')
-      .where('notification.type = :type', { type: ADMIN_BROADCAST_TYPE })
+      .where('notification.type = :type', {
+        type: NotificationType.ADMIN_BROADCAST,
+      })
       .orderBy('notification.createdAt', 'DESC');
 
     if (filter.fromDate) {
@@ -216,22 +243,21 @@ export class AdminNotificationsService {
       });
     }
 
+    if (filter.channel) {
+      query.andWhere(
+        "notification.metadata->'channels' @> :channel",
+        { channel: JSON.stringify([filter.channel]) },
+      );
+    }
+
     const [notifications, total] = await query
       .skip(skip)
       .take(limit)
       .getManyAndCount();
 
-    return {
-      notifications,
-      total,
-      page,
-      limit,
-    };
+    return { notifications, total, page, limit };
   }
 
-  /**
-   * Get delivery statistics for a notification
-   */
   async getDeliveryStats(
     notificationId: string,
   ): Promise<NotificationDeliveryDto> {
@@ -240,31 +266,27 @@ export class AdminNotificationsService {
     });
 
     if (!notification) {
-      throw new NotFoundException(`Notification ${notificationId} not found`);
+      throw new BadRequestException(`Notification ${notificationId} not found`);
     }
 
-    // For broadcast notifications, calculate stats from the broadcast metadata
-    const broadcastNotifications = await this.notificationRepository.find({
+    const related = await this.notificationRepository.find({
       where: {
         type: NotificationType.ADMIN_BROADCAST,
+        title: notification.title,
       },
     });
 
-    // Simplified delivery stats
-    const delivered = broadcastNotifications.filter((n) => !n.read).length;
-    const read = broadcastNotifications.filter((n) => n.read).length;
+    const delivered = related.filter((n) => !n.read).length;
+    const read = related.filter((n) => n.read).length;
 
     return {
-      sent: broadcastNotifications.length,
+      sent: related.length,
       delivered,
       read,
       failed: 0,
     };
   }
 
-  /**
-   * Get target users based on filter criteria
-   */
   private async getTargetUsers(target?: {
     roles?: string[];
     kycStatus?: string[];
@@ -278,7 +300,6 @@ export class AdminNotificationsService {
     if (target?.userIds && target.userIds.length > 0) {
       query.andWhere('user.id IN (:...userIds)', { userIds: target.userIds });
     } else {
-      // Default to active users
       query.where('user.isActive = :isActive', { isActive: true });
 
       if (target?.roles && target.roles.length > 0) {
@@ -298,7 +319,6 @@ export class AdminNotificationsService {
 
     let users = await query.getMany();
 
-    // Filter by savings tier if specified
     if (target?.minSavings !== undefined || target?.maxSavings !== undefined) {
       const userIdsWithSavings = await this.subscriptionRepository
         .createQueryBuilder('subscription')
@@ -328,10 +348,6 @@ export class AdminNotificationsService {
     return users;
   }
 
-  /**
-   * Scheduled job to process scheduled notifications
-   * Runs every minute to check for pending scheduled notifications
-   */
   @ShutdownTrackedTask()
   @Cron(CronExpression.EVERY_MINUTE)
   async processScheduledNotifications(): Promise<void> {
@@ -345,7 +361,7 @@ export class AdminNotificationsService {
       .andWhere('notification.metadata->>processed = :processed', {
         processed: 'false',
       })
-      .andWhere('notification.metadata->scheduledAt <= :now', {
+      .andWhere('notification.metadata->>scheduledAt <= :now', {
         now: now.toISOString(),
       })
       .getMany();
@@ -363,14 +379,13 @@ export class AdminNotificationsService {
 
         await this.broadcastNotification(dto);
 
-        // Mark as processed
         notification.metadata = { ...notification.metadata, processed: true };
         await this.notificationRepository.save(notification);
 
         this.logger.log(`Processed scheduled notification ${notification.id}`);
       } catch (error) {
         this.logger.error(
-          `Failed to process scheduled notification ${notification.id}: ${error.message}`,
+          `Failed to process scheduled notification ${notification.id}: ${(error as Error).message}`,
         );
       }
     }

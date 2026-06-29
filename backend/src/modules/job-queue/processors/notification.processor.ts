@@ -1,12 +1,25 @@
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { QUEUE_NAMES } from '../job-queue.constants';
 import { NotificationJobData } from '../job-queue.service';
+import {
+  Notification,
+  NotificationType,
+} from '../../notifications/entities/notification.entity';
 
-@Processor(QUEUE_NAMES.NOTIFICATIONS)
+@Processor(QUEUE_NAMES.NOTIFICATIONS, { concurrency: 5 })
 export class NotificationProcessor extends WorkerHost {
   private readonly logger = new Logger(NotificationProcessor.name);
+
+  constructor(
+    @InjectRepository(Notification)
+    private readonly notificationRepo: Repository<Notification>,
+  ) {
+    super();
+  }
 
   async process(job: Job<NotificationJobData>): Promise<any> {
     this.logger.debug(
@@ -15,11 +28,20 @@ export class NotificationProcessor extends WorkerHost {
 
     const { userId, type, title, message, metadata } = job.data;
 
+    const notification = this.notificationRepo.create({
+      userId,
+      type: type as NotificationType,
+      title,
+      message,
+      metadata: metadata ?? null,
+    });
+    await this.notificationRepo.save(notification);
+
     this.logger.log(
       `Notification dispatched: user=${userId} type=${type} title="${title}"`,
     );
 
-    return { processed: true, userId, type };
+    return { processed: true, userId, type, notificationId: notification.id };
   }
 
   @OnWorkerEvent('failed')

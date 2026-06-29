@@ -25,12 +25,15 @@ import { IndexerService } from './indexer.service';
 import { IndexerCheckpointService } from './indexer-checkpoint.service';
 import { BlockchainReplayService } from './blockchain-replay.service';
 import { BalanceSyncService } from './balance-sync.service';
+import { JobQueueModule } from '../job-queue/job-queue.module';
+import { EventStreamBackpressureService } from './event-stream-backpressure.service';
 import { ProtocolMetrics } from '../admin-analytics/entities/protocol-metrics.entity';
 
 @Global()
 @Module({
   imports: [
     HttpModule,
+    JobQueueModule,
     CacheModule.register({
       ttl: 300,
       max: 100,
@@ -65,6 +68,7 @@ import { ProtocolMetrics } from '../admin-analytics/entities/protocol-metrics.en
     WithdrawHandler,
     YieldHandler,
     BalanceSyncService,
+    EventStreamBackpressureService,
   ],
   exports: [
     StellarService,
@@ -78,6 +82,7 @@ import { ProtocolMetrics } from '../admin-analytics/entities/protocol-metrics.en
     WithdrawHandler,
     YieldHandler,
     BalanceSyncService,
+    EventStreamBackpressureService,
   ],
 })
 export class BlockchainModule {}

@@ -13,6 +13,8 @@ import { SavingsProduct } from '../savings/entities/savings-product.entity';
 import { ShutdownTrackedTask } from '../../common/decorators/shutdown-task.decorator';
 import { IndexerCheckpointService } from './indexer-checkpoint.service';
 import { DistributedLockService } from '../../common/distributed-lock/distributed-lock.service';
+import { EventStreamBackpressureService } from './event-stream-backpressure.service';
+import { JobQueueService } from '../job-queue/job-queue.service';
 import { INDEXER_STREAM_SAVINGS } from './indexer-checkpoint.utils';
 
 /** Shape of a raw Soroban event as returned by the RPC. */
@@ -49,6 +51,8 @@ export class IndexerService implements OnModuleInit {
     private readonly yieldHandler: YieldHandler,
     private readonly checkpointService: IndexerCheckpointService,
     private readonly lockService: DistributedLockService,
+    private readonly backpressureService: EventStreamBackpressureService,
+    private readonly jobQueueService: JobQueueService,
   ) {
     this.lockTtlMs = this.configService.get<number>(
       'distributedLock.indexerTtlMs',
@@ -92,10 +96,32 @@ export class IndexerService implements OnModuleInit {
         return;
       }
 
+      if (await this.backpressureService.shouldPauseIngestion()) {
+        this.logger.warn(
+          `Indexer paused due to backpressure (${events.length} events deferred)`,
+        );
+        return;
+      }
+
+      if (!this.backpressureService.canIngestEvents(events.length)) {
+        this.logger.warn('Ingestion rate limit reached, deferring events');
+        return;
+      }
+
       let processed = 0;
       let failed = 0;
+      let queued = 0;
 
       for (const event of events) {
+        const eventId = event.id ?? `${event.ledger}-${event.txHash}`;
+        await this.jobQueueService.addBlockchainJob({
+          eventId,
+          contractId: event.contractId ?? 'unknown',
+          eventType: this.resolveEventType(event),
+          rawEvent: event as Record<string, unknown>,
+        });
+        queued++;
+
         const ok = await this.processEvent(event);
         if (ok) {
           processed++;
@@ -105,7 +131,7 @@ export class IndexerService implements OnModuleInit {
       }
 
       this.logger.log(
-        `Processed ${processed} events (Failed: ${failed}) from ledger ${events[0].ledger} to ${events[events.length - 1].ledger}`,
+        `Processed ${processed} events (Failed: ${failed}, Queued: ${queued}) from ledger ${events[0].ledger} to ${events[events.length - 1].ledger}`,
       );
     } catch (err) {
       this.logger.error(`Indexer cycle failed: ${(err as Error).message}`);
@@ -283,6 +309,10 @@ export class IndexerService implements OnModuleInit {
 
   getLastProcessedTimestamp(): number | null {
     return this.indexerState?.lastProcessedTimestamp ?? null;
+  }
+
+  getBackpressureStatus() {
+    return this.backpressureService.getStatus();
   }
 
   async reloadContractIds() {

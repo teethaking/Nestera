@@ -209,6 +209,58 @@ export default () => ({
       10,
     ),
   },
+  health: {
+    retentionDays: parseInt(process.env.HEALTH_RETENTION_DAYS || '30', 10),
+  },
+  upload: {
+    provider: process.env.STORAGE_PROVIDER || 'local',
+    defaultMaxSize: parseInt(
+      process.env.UPLOAD_DEFAULT_MAX_SIZE || String(10 * 1024 * 1024),
+      10,
+    ),
+    maxAvatarSize: parseInt(
+      process.env.UPLOAD_MAX_AVATAR_SIZE || String(5 * 1024 * 1024),
+      10,
+    ),
+    maxDocumentSize: parseInt(
+      process.env.UPLOAD_MAX_DOCUMENT_SIZE || String(10 * 1024 * 1024),
+      10,
+    ),
+    signedUrlTtlSeconds: parseInt(process.env.STORAGE_SIGNED_URL_TTL || '3600', 10),
+    s3Bucket: process.env.STORAGE_S3_BUCKET,
+    s3Region: process.env.STORAGE_S3_REGION ?? 'us-east-1',
+    awsAccessKeyId: process.env.STORAGE_AWS_ACCESS_KEY_ID,
+    awsSecretAccessKey: process.env.STORAGE_AWS_SECRET_ACCESS_KEY,
+    localDir: process.env.STORAGE_LOCAL_DIR || './uploads',
+    virusScanningEnabled: process.env.UPLOAD_VIRUS_SCANNING === 'true',
+  },
+  adminNotifications: {
+    maxPerMinute: parseInt(process.env.ADMIN_NOTIF_MAX_PER_MINUTE || '60', 10),
+    maxPerHour: parseInt(process.env.ADMIN_NOTIF_MAX_PER_HOUR || '500', 10),
+    dedupWindowMs: parseInt(
+      process.env.ADMIN_NOTIF_DEDUP_WINDOW_MS || '300000',
+      10,
+    ),
+    batchSize: parseInt(process.env.ADMIN_NOTIF_BATCH_SIZE || '50', 10),
+  },
+  eventStream: {
+    maxQueueDepth: parseInt(
+      process.env.EVENT_STREAM_MAX_QUEUE_DEPTH || '1000',
+      10,
+    ),
+    workerConcurrency: parseInt(
+      process.env.EVENT_STREAM_WORKER_CONCURRENCY || '5',
+      10,
+    ),
+    maxIngestionRatePerSecond: parseInt(
+      process.env.EVENT_STREAM_MAX_INGEST_RATE || '100',
+      10,
+    ),
+    pausePollIntervalMs: parseInt(
+      process.env.EVENT_STREAM_PAUSE_POLL_MS || '30000',
+      10,
+    ),
+  },
   referralFraud: {
     creationRateWindowMs: parseInt(
       process.env.REFERRAL_FRAUD_CREATION_WINDOW_MS || '3600000',

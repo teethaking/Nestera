@@ -5,6 +5,8 @@ import { BalanceSyncService } from './balance-sync.service';
 import { IndexerService } from './indexer.service';
 import { TransactionDto } from './dto/transaction.dto';
 
+import { EventStreamBackpressureService } from './event-stream-backpressure.service';
+
 @ApiTags('Blockchain')
 @Controller('blockchain')
 export class BlockchainController {
@@ -12,6 +14,7 @@ export class BlockchainController {
     private readonly stellarService: StellarService,
     private readonly balanceSyncService: BalanceSyncService,
     private readonly indexerService: IndexerService,
+    private readonly backpressureService: EventStreamBackpressureService,
   ) {}
 
   @Post('wallets/generate')
@@ -85,5 +88,15 @@ export class BlockchainController {
       totalEventsFailed: state?.totalEventsFailed ?? 0,
       monitoredContracts: this.indexerService.getMonitoredContracts(),
     };
+  }
+
+  @Get('backpressure/status')
+  @ApiOperation({
+    summary: 'Get event stream backpressure status',
+    description:
+      'Queue depth, ingestion rate, and pause state for blockchain event processing',
+  })
+  async getBackpressureStatus() {
+    return this.backpressureService.getStatus();
   }
 }
