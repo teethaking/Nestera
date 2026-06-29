@@ -226,8 +226,8 @@ export class SavingsCalculatorService {
     return products.map((p) => ({
       productId: p.id,
       name: p.name,
-      apy: Number(p.apy),
-      minDeposit: Number(p.minDeposit),
+      apy: Number(p.interestRate),
+      minDeposit: Number(p.minAmount),
       maxCapacity: Number(p.maxCapacity),
       currentUtilization:
         Number(p.maxCapacity) > 0

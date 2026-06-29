@@ -528,7 +528,7 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 });
+      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
 
       expect(result.data).toEqual([]);
       expect(result.meta.totalItemCount).toBe(0);
@@ -585,7 +585,7 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 });
+      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0].id).toBe('tx-above-threshold');
@@ -646,7 +646,7 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 });
+      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0].id).toBe('tx-slightly-above');
@@ -714,7 +714,7 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 });
+      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
 
       expect(result.data).toEqual([]);
       expect(result.meta.totalItemCount).toBe(0);
@@ -778,7 +778,7 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 20 });
+      const result = await service.findSuspicious({ skip: 0, limit: 20 } as any);
 
       expect(result.data.length).toBeGreaterThan(0);
       // All 11 transactions should be flagged
@@ -849,7 +849,7 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 10 });
+      const result = await service.findSuspicious({ skip: 0, limit: 10 } as any);
 
       expect(result.data).toEqual([]);
       expect(result.meta.totalItemCount).toBe(0);
@@ -916,7 +916,7 @@ describe('AdminTransactionsService', () => {
         return repeatedFailuresQB as any;
       });
 
-      const result = await service.findSuspicious({ skip: 0, limit: 20 });
+      const result = await service.findSuspicious({ skip: 0, limit: 20 } as any);
 
       expect(result.data.length).toBeGreaterThan(0);
       // All 4 transactions should be flagged

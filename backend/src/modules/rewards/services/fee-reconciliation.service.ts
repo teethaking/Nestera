@@ -46,7 +46,7 @@ export class FeeReconciliationService {
         ? ReconciliationStatus.RECONCILED
         : ReconciliationStatus.DISCREPANCY;
 
-    const reconciliation = this.reconciliationRepo.create({
+    const reconciliation = Object.assign(this.reconciliationRepo.create(), {
       referenceType,
       referenceId,
       userId,
@@ -55,9 +55,9 @@ export class FeeReconciliationService {
       difference,
       discrepancyPercentage: Number(discrepancyPercentage.toFixed(3)),
       status,
-      notes: notes ?? null,
+      notes: (notes ?? null) as string,
       reconciledAt:
-        status === ReconciliationStatus.RECONCILED ? new Date() : null,
+        status === ReconciliationStatus.RECONCILED ? new Date() : (null as unknown as Date),
     });
 
     const saved = await this.reconciliationRepo.save(reconciliation);
@@ -99,7 +99,7 @@ export class FeeReconciliationService {
     record.status = ReconciliationStatus.RECONCILED;
     record.reconciledAt = new Date();
     record.reconciledBy = resolvedBy;
-    record.notes = notes ?? null;
+    record.notes = (notes ?? null) as string;
 
     return this.reconciliationRepo.save(record);
   }

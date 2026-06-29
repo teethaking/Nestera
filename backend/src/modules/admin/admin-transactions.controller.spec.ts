@@ -50,6 +50,8 @@ describe('AdminTransactionsController', () => {
           pageCount: 0,
           hasPreviousPage: false,
           hasNextPage: false,
+          pageSize: 10,
+          nextCursor: null,
         },
       };
 
@@ -78,6 +80,8 @@ describe('AdminTransactionsController', () => {
           pageCount: 0,
           hasPreviousPage: false,
           hasNextPage: false,
+          pageSize: 10,
+          nextCursor: null,
         },
       };
 

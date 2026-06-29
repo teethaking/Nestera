@@ -10,7 +10,6 @@ import { CompressionMetricsService } from './services/compression-metrics.servic
 import { CompressionMetricsMiddleware } from './middleware/compression.middleware';
 import { AuditLogService } from './services/audit-log.service';
 import { CacheModule } from '../modules/cache/cache.module';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditLog } from './entities/audit-log.entity';
 import { DistributedLockModule } from './distributed-lock/distributed-lock.module';
 
