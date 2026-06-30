@@ -16,13 +16,14 @@ import {
  * The decorator is a no-op when no `tracingService` is present on the
  * instance (e.g. in unit tests that don't inject APM).
  */
-export function TraceSpan(operationName?: string): MethodDecorator {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function TraceSpan(operationName?: string): any {
   return (
     target: object,
     propertyKey: string | symbol,
-    descriptor: TypedPropertyDescriptor<unknown>,
-  ) => {
-    const original = descriptor.value;
+    descriptor: PropertyDescriptor,
+  ): PropertyDescriptor => {
+    const original: unknown = descriptor.value;
 
     if (typeof original !== 'function') {
       return descriptor;
@@ -30,7 +31,7 @@ export function TraceSpan(operationName?: string): MethodDecorator {
 
     const resolvedName =
       operationName ??
-      `${target.constructor.name}.${String(propertyKey)}`;
+      `${(target as { constructor: { name: string } }).constructor.name}.${String(propertyKey)}`;
 
     const wrapped = async function (
       this: Record<string, unknown>,
@@ -53,7 +54,7 @@ export function TraceSpan(operationName?: string): MethodDecorator {
       const span: Span = tracer.startSpan(resolvedName, spanCtx, {
         'service.layer': 'domain',
         'code.function': String(propertyKey),
-        'code.class': target.constructor.name,
+        'code.class': (target as { constructor: { name: string } }).constructor.name,
       });
 
       try {
@@ -68,7 +69,7 @@ export function TraceSpan(operationName?: string): MethodDecorator {
       }
     };
 
-    descriptor.value = wrapped as typeof descriptor.value;
+    descriptor.value = wrapped;
     return descriptor;
   };
 }
