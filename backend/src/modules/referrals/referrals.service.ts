@@ -21,6 +21,10 @@ import { ReferralFraudDetectionService } from './referral-fraud-detection.servic
 import { ReferralFraudEvaluationContext } from './referral-fraud.types';
 import { DistributedTracingService } from '../apm/distributed-tracing.service';
 import { TraceSpan } from '../../common/decorators/trace-span.decorator';
+import {
+  REFERRAL_COMPLETED_EVENT,
+  ReferralCompletedEventPayloadV1,
+} from './referral-events.types';
 
 @Injectable()
 export class ReferralsService {
@@ -307,13 +311,18 @@ export class ReferralsService {
       { depositAmount },
     );
 
-    // Emit event for reward distribution
-    this.eventEmitter.emit('referral.completed', {
+    // Emit versioned referral.completed event for backward compatible consumers
+    const completedEvent: ReferralCompletedEventPayloadV1 = {
+      eventType: REFERRAL_COMPLETED_EVENT,
+      schemaVersion: 1,
       referralId: referral.id,
       referrerId: referral.referrerId,
-      refereeId: referral.refereeId,
+      refereeId: referral.refereeId!,
       campaignId: referral.campaignId,
-    });
+      completedAt: referral.completedAt?.toISOString(),
+    };
+
+    this.eventEmitter.emit(REFERRAL_COMPLETED_EVENT, completedEvent);
 
     this.logger.log(`Referral ${referral.id} completed`);
   }

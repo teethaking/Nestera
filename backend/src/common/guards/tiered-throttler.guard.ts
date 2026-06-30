@@ -34,6 +34,8 @@ const TIER_LIMITS: Record<
   [UserTier.FREE]: {
     default: { limit: 60, ttl: 60000 },
     auth: { limit: 5, ttl: 15 * 60 * 1000 },
+    otp: { limit: 3, ttl: 15 * 60 * 1000 },
+    'wallet-link': { limit: 3, ttl: 60 * 60 * 1000 },
     rpc: { limit: 5, ttl: 60000 },
     export: { limit: 1, ttl: 15 * 60 * 1000 },
     vote: { limit: 5, ttl: 60_000 },
@@ -42,6 +44,8 @@ const TIER_LIMITS: Record<
   [UserTier.VERIFIED]: {
     default: { limit: 150, ttl: 60000 },
     auth: { limit: 10, ttl: 15 * 60 * 1000 },
+    otp: { limit: 5, ttl: 15 * 60 * 1000 },
+    'wallet-link': { limit: 5, ttl: 60 * 60 * 1000 },
     rpc: { limit: 15, ttl: 60000 },
     export: { limit: 3, ttl: 15 * 60 * 1000 },
     vote: { limit: 10, ttl: 60_000 },
@@ -50,6 +54,8 @@ const TIER_LIMITS: Record<
   [UserTier.PREMIUM]: {
     default: { limit: 300, ttl: 60000 },
     auth: { limit: 15, ttl: 15 * 60 * 1000 },
+    otp: { limit: 5, ttl: 15 * 60 * 1000 },
+    'wallet-link': { limit: 10, ttl: 60 * 60 * 1000 },
     rpc: { limit: 30, ttl: 60000 },
     export: { limit: 4, ttl: 15 * 60 * 1000 },
     vote: { limit: 20, ttl: 60_000 },
@@ -58,6 +64,8 @@ const TIER_LIMITS: Record<
   [UserTier.ENTERPRISE]: {
     default: { limit: 1000, ttl: 60000 },
     auth: { limit: 30, ttl: 15 * 60 * 1000 },
+    otp: { limit: 10, ttl: 15 * 60 * 1000 },
+    'wallet-link': { limit: 20, ttl: 60 * 60 * 1000 },
     rpc: { limit: 100, ttl: 60000 },
     export: { limit: 8, ttl: 15 * 60 * 1000 },
     vote: { limit: 30, ttl: 60_000 },
@@ -66,6 +74,8 @@ const TIER_LIMITS: Record<
   [UserTier.ADMIN]: {
     default: { limit: 1000, ttl: 60000 },
     auth: { limit: 50, ttl: 15 * 60 * 1000 },
+    otp: { limit: 20, ttl: 15 * 60 * 1000 },
+    'wallet-link': { limit: 20, ttl: 60 * 60 * 1000 },
     rpc: { limit: 100, ttl: 60000 },
     export: { limit: 6, ttl: 15 * 60 * 1000 },
     vote: { limit: 30, ttl: 60_000 },

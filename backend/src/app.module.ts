@@ -354,6 +354,20 @@ const envValidationSchema = Joi.object({
         limit: 5,
       },
       {
+        // OTP / 2FA verification attempts — deliberately strict to resist
+        // brute-force attacks on one-time codes.
+        name: 'otp',
+        ttl: 15 * 60 * 1000, // 15 minutes
+        limit: 3,
+      },
+      {
+        // Wallet-linking is an infrequent, sensitive operation.
+        // 5 attempts per hour per user prevents automated wallet-spam.
+        name: 'wallet-link',
+        ttl: 60 * 60 * 1000, // 1 hour
+        limit: 5,
+      },
+      {
         name: 'rpc',
         ttl: 60000, // 1 minute
         limit: 10,
