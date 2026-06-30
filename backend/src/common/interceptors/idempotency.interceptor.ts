@@ -6,6 +6,7 @@ import {
   ConflictException,
   Logger,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Observable, of, throwError } from 'rxjs';
@@ -19,6 +20,7 @@ import {
   IdempotencyOptions,
 } from '../decorators/idempotent.decorator';
 import { ErrorCode } from '../enums/error-code.enum';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 interface StoredIdempotencyRecord {
   payloadHash: string;
@@ -30,6 +32,17 @@ interface StoredIdempotencyRecord {
 const LOCK_SUFFIX = ':lock';
 const LOCK_TTL_MS = 30_000;
 
+/**
+ * Infers a related entity type from the route path for admin observability.
+ * e.g. /savings/123 → "savings", /transactions/abc → "transactions"
+ */
+function inferEntityType(path: string): string | undefined {
+  const segments = path.split('/').filter(Boolean);
+  // Return the first meaningful path segment (skipping 'api', 'v1', etc.)
+  const skipSegments = new Set(['api', 'v1', 'v2', 'v3']);
+  return segments.find((s) => !skipSegments.has(s) && !/^\d+$/.test(s));
+}
+
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
   private readonly logger = new Logger(IdempotencyInterceptor.name);
@@ -37,6 +50,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
   constructor(
     private readonly reflector: Reflector,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
   async intercept(
@@ -69,6 +83,15 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
     if (existing) {
       if (existing.payloadHash !== payloadHash) {
+        // Conflict: same key, different payload
+        this.emitConflict({
+          idempotencyKey,
+          requestFingerprintHash: payloadHash,
+          method: request.method,
+          path: request.path,
+          conflictType: 'payload_mismatch',
+        });
+
         return throwError(
           () =>
             new ConflictException({
@@ -82,6 +105,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
       this.logger.debug(
         `Idempotency cache hit for key=${idempotencyKey} on ${request.method} ${request.path}`,
       );
+
+      // Emit replay event for monitoring
+      this.eventEmitter?.emit('idempotency.replay', {
+        key: idempotencyKey,
+        method: request.method,
+        path: request.path,
+      });
+
       response.setHeader('Idempotency-Replay', 'true');
       response.status(existing.statusCode);
       return of(existing.body);
@@ -91,6 +122,15 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const lockAcquired = await this.tryAcquireLock(lockKey);
 
     if (!lockAcquired) {
+      // Conflict: concurrent processing with the same key
+      this.emitConflict({
+        idempotencyKey,
+        requestFingerprintHash: payloadHash,
+        method: request.method,
+        path: request.path,
+        conflictType: 'concurrent_processing',
+      });
+
       return throwError(
         () =>
           new ConflictException({
@@ -102,6 +142,13 @@ export class IdempotencyInterceptor implements NestInterceptor {
     }
 
     const ttlMs = (options.ttlSeconds ?? 86400) * 1000;
+
+    // Emit first_use event for monitoring
+    this.eventEmitter?.emit('idempotency.first_use', {
+      key: idempotencyKey,
+      method: request.method,
+      path: request.path,
+    });
 
     return next.handle().pipe(
       tap(async (body) => {
@@ -142,5 +189,23 @@ export class IdempotencyInterceptor implements NestInterceptor {
     } catch {
       // Lock cleanup is best-effort
     }
+  }
+
+  private emitConflict(params: {
+    idempotencyKey: string;
+    requestFingerprintHash: string;
+    method: string;
+    path: string;
+    conflictType: 'payload_mismatch' | 'concurrent_processing';
+  }): void {
+    this.eventEmitter?.emit('idempotency.conflict', {
+      idempotencyKey: params.idempotencyKey,
+      requestFingerprintHash: params.requestFingerprintHash,
+      method: params.method,
+      path: params.path,
+      conflictType: params.conflictType,
+      timestamp: new Date().toISOString(),
+      relatedEntityType: inferEntityType(params.path),
+    });
   }
 }

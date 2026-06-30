@@ -20,6 +20,7 @@ import { AdminDisputesController } from './admin-disputes.controller';
 import { AdminAuditLogsController } from './admin-audit-logs.controller';
 import { AdminNotificationsController } from './admin-notifications.controller';
 import { AdminTransactionsController } from './admin-transactions.controller';
+import { AdminIdempotencyController } from './admin-idempotency.controller';
 
 import { AdminUsersService } from './admin-users.service';
 import { AdminSavingsService } from './admin-savings.service';
@@ -84,6 +85,7 @@ import { JobQueueModule } from '../job-queue/job-queue.module';
     AdminTransactionsController,
     AdminDisputesController,
     AdminAuditLogsController,
+    AdminIdempotencyController,
   ],
   providers: [
     AdminUsersService,
