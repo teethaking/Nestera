@@ -6,20 +6,11 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
-
-interface ValidationError {
-  field: string;
-  value?: unknown;
-  constraints: Record<string, string>;
-  children?: ValidationError[];
-}
-
-interface ClassValidatorError {
-  property: string;
-  value?: unknown;
-  constraints?: Record<string, string>;
-  children?: ClassValidatorError[];
-}
+import {
+  flattenValidationErrors,
+  ClassValidatorErrorLike,
+  ValidationIssue,
+} from '../validators/validation-error.utils';
 
 @Catch(BadRequestException)
 export class ValidationExceptionFilter implements ExceptionFilter {
@@ -37,7 +28,7 @@ export class ValidationExceptionFilter implements ExceptionFilter {
     const statusCode = exception.getStatus();
     const correlationId = (request as any).correlationId;
 
-    let formattedErrors: ValidationError[] | string[];
+    let formattedErrors: ValidationIssue[] | string[];
     let message: string;
 
     if (typeof exceptionResponse === 'string') {
@@ -47,8 +38,8 @@ export class ValidationExceptionFilter implements ExceptionFilter {
       const msgArray = exceptionResponse.message;
 
       if (msgArray.length > 0 && typeof msgArray[0] === 'object') {
-        const classValidatorErrors = msgArray as ClassValidatorError[];
-        formattedErrors = this.formatClassValidatorErrors(classValidatorErrors);
+        const classValidatorErrors = msgArray as ClassValidatorErrorLike[];
+        formattedErrors = flattenValidationErrors(classValidatorErrors);
         message = 'Validation failed';
       } else {
         formattedErrors = msgArray as string[];
@@ -80,34 +71,4 @@ export class ValidationExceptionFilter implements ExceptionFilter {
     response.status(statusCode).json(body);
   }
 
-  private formatClassValidatorErrors(
-    errors: ClassValidatorError[],
-    parentField = '',
-  ): ValidationError[] {
-    const result: ValidationError[] = [];
-
-    for (const error of errors) {
-      const field = parentField
-        ? `${parentField}.${error.property}`
-        : error.property;
-
-      if (error.constraints && Object.keys(error.constraints).length > 0) {
-        result.push({
-          field,
-          value: error.value,
-          constraints: error.constraints,
-        });
-      }
-
-      if (error.children && error.children.length > 0) {
-        const childErrors = this.formatClassValidatorErrors(
-          error.children,
-          field,
-        );
-        result.push(...childErrors);
-      }
-    }
-
-    return result;
-  }
 }

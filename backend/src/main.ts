@@ -24,6 +24,8 @@ import { VersionAnalyticsService } from './common/versioning/version-analytics.s
 import { GracefulShutdownService } from './common/services/graceful-shutdown.service';
 import { ContractCompatibilityService } from './common/services/contract-compatibility.service';
 import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
+import { flattenValidationErrors } from './common/validators/validation-error.utils';
+import type { ValidationError as ClassValidatorError } from 'class-validator';
 
 type AppCorsConfig = {
   enabled: boolean;
@@ -184,10 +186,7 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
       transform: true,
       exceptionFactory: (errors) => {
-        const result = errors.map((error) => ({
-          field: error.property,
-          message: Object.values(error.constraints || {}).join(', '),
-        }));
+        const result = flattenValidationErrors(errors as ClassValidatorError[]);
         return new BadRequestException({
           message: 'Validation failed',
           errors: result,

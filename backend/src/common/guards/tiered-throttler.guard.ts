@@ -4,6 +4,8 @@ import {
   Inject,
   Logger,
   Optional,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { ThrottlerGuard, ThrottlerException } from '@nestjs/throttler';
 import { Request, Response } from 'express';
@@ -166,6 +168,8 @@ export class TieredThrottlerGuard extends ThrottlerGuard {
       return result;
     } catch (error) {
       if (error instanceof ThrottlerException) {
+        const retryAfter = Math.ceil(tierLimits.ttl / 1000);
+        const resetAt = new Date(Date.now() + tierLimits.ttl).toISOString();
         this.logger.warn(
           `[Rate Limit] Tier: ${tier} | User: ${user?.id || 'anon'} | ` +
             `Route: ${request.method} ${request.path} | ` +
@@ -185,16 +189,26 @@ export class TieredThrottlerGuard extends ThrottlerGuard {
           timestamp: new Date(),
         });
 
-        response.setHeader('Retry-After', Math.ceil(tierLimits.ttl / 1000));
+        response.setHeader('Retry-After', retryAfter);
         response.setHeader('X-RateLimit-Remaining', 0);
         response.setHeader(
           'X-RateLimit-Reset',
-          new Date(Date.now() + tierLimits.ttl).toISOString(),
+          resetAt,
         );
 
-        throw new ThrottlerException(
-          `Rate limit exceeded for ${tier} tier. ` +
-            `Maximum ${tierLimits.limit} requests per ${Math.round(tierLimits.ttl / 1000)} seconds.`,
+        throw new HttpException(
+          {
+            success: false,
+            statusCode: HttpStatus.TOO_MANY_REQUESTS,
+            errorCode: 'THROTTLED',
+            message: `Rate limit exceeded for ${tier} tier.`,
+            endpoint: `${request.method} ${request.path}`,
+            retryAfter,
+            resetAt,
+            limit: tierLimits.limit,
+            ttl: tierLimits.ttl,
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
         );
       }
       throw error;

@@ -9,6 +9,10 @@ import {
 import { Request, Response } from 'express';
 import { ErrorCode } from '../enums/error-code.enum';
 import { DomainException } from '../exceptions/domain.exception';
+import {
+  ClassValidatorErrorLike,
+  flattenValidationErrors,
+} from '../validators/validation-error.utils';
 
 interface StandardErrorResponse {
   success: false;
@@ -76,6 +80,16 @@ function extractValidationDetails(
 ): Array<Record<string, unknown>> | undefined {
   const msg = exceptionResponse.message;
   if (!Array.isArray(msg)) return undefined;
+
+  if (msg.length > 0 && typeof msg[0] === 'object') {
+    return flattenValidationErrors(msg as ClassValidatorErrorLike[]).map(
+      (issue) => ({
+        field: issue.field,
+        constraints: issue.constraints,
+        value: issue.value,
+      }),
+    );
+  }
 
   return msg.map((m: string) => {
     const field = m.split(' ')[0];

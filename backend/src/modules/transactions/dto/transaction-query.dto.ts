@@ -16,7 +16,7 @@ import {
 import { TransactionSearchCriteriaDto } from './transaction-search-criteria.dto';
 
 export class TransactionQueryDto extends TransactionSearchCriteriaDto {
-  @ApiPropertyOptional({ minimum: 1, default: 1 })
+  @ApiPropertyOptional({ minimum: 1, default: 1, example: 1 })
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -27,6 +27,7 @@ export class TransactionQueryDto extends TransactionSearchCriteriaDto {
     minimum: 1,
     maximum: MAX_PAGE_SIZE,
     default: DEFAULT_PAGE_SIZE,
+    example: DEFAULT_PAGE_SIZE,
   })
   @Type(() => Number)
   @IsInt()
@@ -37,6 +38,7 @@ export class TransactionQueryDto extends TransactionSearchCriteriaDto {
 
   @ApiPropertyOptional({
     description: 'Opaque cursor for cursor-based pagination',
+    example: 'eyJpZCI6IDEwfQ==',
   })
   @IsOptional()
   @IsString()
@@ -45,6 +47,7 @@ export class TransactionQueryDto extends TransactionSearchCriteriaDto {
   @ApiPropertyOptional({
     description: 'Set to true to include totalCount metadata',
     default: false,
+    example: false,
   })
   @IsOptional()
   @IsBooleanString()

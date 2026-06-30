@@ -12,10 +12,41 @@ import {
   ApiOperation,
   ApiBearerAuth,
   ApiBody,
+  ApiOkResponse,
 } from '@nestjs/swagger';
 import { CacheStrategyService } from './cache-strategy.service';
 import { CacheWarmingService } from './cache-warming.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { ApiProperty } from '@nestjs/swagger';
+
+class CacheMetricsResponseDto {
+  @ApiProperty({ example: 124 })
+  hits: number;
+
+  @ApiProperty({ example: 31 })
+  misses: number;
+
+  @ApiProperty({ example: 12 })
+  sets: number;
+
+  @ApiProperty({ example: 8 })
+  deletes: number;
+
+  @ApiProperty({ example: 8, description: 'Total eviction-style deletes observed' })
+  evictions: number;
+
+  @ApiProperty({ example: 0.8, description: 'Hit ratio as a decimal' })
+  hitRatio: number;
+
+  @ApiProperty({ example: 0.2, description: 'Miss ratio as a decimal' })
+  missRatio: number;
+
+  @ApiProperty({ example: '80.00%' })
+  hitRate: string;
+
+  @ApiProperty({ example: '20.00%' })
+  missRate: string;
+}
 
 @ApiTags('Cache')
 @Controller('cache')
@@ -31,7 +62,17 @@ export class CacheController {
   @ApiOperation({
     summary: 'Get cache hit/miss ratios and per-operation latency (avg/p95/p99)',
   })
+  @ApiOkResponse({ type: CacheMetricsResponseDto })
   getMetrics() {
+    return this.cacheStrategy.getMetrics();
+  }
+
+  @Get('dashboard')
+  @ApiOperation({
+    summary: 'Get cache dashboard summary including hit ratio, misses, and evictions',
+  })
+  @ApiOkResponse({ type: CacheMetricsResponseDto })
+  getDashboard() {
     return this.cacheStrategy.getMetrics();
   }
 
