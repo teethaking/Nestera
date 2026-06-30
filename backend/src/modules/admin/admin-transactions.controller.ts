@@ -25,6 +25,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Idempotent } from '../../common/decorators/idempotent.decorator';
 import { AdminTransactionsService } from './admin-transactions.service';
 import { AdminExportService } from './services/admin-export.service';
 import { AdminTransactionFilterDto } from './dto/admin-transaction-filter.dto';
@@ -127,6 +128,7 @@ export class AdminTransactionsController {
   @Post('export/async')
   @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.ANALYST)
   @HttpCode(HttpStatus.ACCEPTED)
+  @Idempotent({ ttlSeconds: 86400 })
   @ApiOperation({ summary: 'Queue an async transactions CSV export job' })
   @ApiResponse({
     status: 202,
@@ -209,6 +211,7 @@ export class AdminTransactionsController {
   @Post(':id/notes')
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(201)
+  @Idempotent({ ttlSeconds: 86400 })
   @ApiOperation({ summary: 'Add an admin note to a transaction' })
   @ApiResponse({
     status: 201,
