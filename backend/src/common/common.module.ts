@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PiiEncryptionService } from './services/pii-encryption.service';
 import { RateLimitMonitorService } from './services/rate-limit-monitor.service';
+import { IdempotencyMonitorService } from './services/idempotency-monitor.service';
 import { SecretsConfigService } from './services/secrets-config.service';
 import { IdempotencyService } from './services/idempotency.service';
 import { IdempotencyCleanupService } from './services/idempotency-cleanup.service';
@@ -23,6 +24,7 @@ import { DistributedLockModule } from './distributed-lock/distributed-lock.modul
   imports: [CacheModule, TypeOrmModule.forFeature([AuditLog, Tenant])],
   providers: [
     RateLimitMonitorService,
+    IdempotencyMonitorService,
     PiiEncryptionService,
     SecretsConfigService,
     IdempotencyService,
@@ -38,6 +40,7 @@ import { DistributedLockModule } from './distributed-lock/distributed-lock.modul
   ],
   exports: [
     RateLimitMonitorService,
+    IdempotencyMonitorService,
     PiiEncryptionService,
     SecretsConfigService,
     IdempotencyService,
